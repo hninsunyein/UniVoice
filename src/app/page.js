@@ -77,7 +77,55 @@ export default function LandingPage() {
               <button className="lp-hero-cta" onClick={scrollToMagazines}>Read Magazine</button>
             </div>
             <div className="lp-hero-right">
-              <div className="lp-article-image"></div>
+              <div className="lp-hero-image">
+                {/* Magazine stack mockup */}
+                <div style={{ position: "relative", width: 220, height: 260 }}>
+                  {/* Back magazine (shadow) */}
+                  <div style={{
+                    position: "absolute", top: 12, left: 20,
+                    width: 160, height: 220, borderRadius: 8,
+                    background: "linear-gradient(160deg,#0a2d6a,#1455a8)",
+                    boxShadow: "4px 4px 16px rgba(13,61,138,.25)",
+                    transform: "rotate(4deg)"
+                  }} />
+                  {/* Front magazine cover */}
+                  <div style={{
+                    position: "absolute", top: 0, left: 0,
+                    width: 160, height: 220, borderRadius: 8,
+                    background: "linear-gradient(160deg,#0d3d8a 0%,#1a6fc4 55%,#4fa3f7 100%)",
+                    boxShadow: "6px 10px 28px rgba(13,61,138,.35)",
+                    padding: "18px 14px",
+                    display: "flex", flexDirection: "column",
+                    overflow: "hidden"
+                  }}>
+                    {/* Decorative circle */}
+                    <div style={{ position: "absolute", top: -24, right: -24, width: 90, height: 90, borderRadius: "50%", background: "rgba(255,255,255,.07)" }} />
+                    <div style={{ position: "absolute", bottom: -16, right: -16, width: 70, height: 70, borderRadius: "50%", background: "rgba(255,255,255,.05)" }} />
+
+                    <div style={{ fontSize: 9, color: "rgba(255,255,255,.55)", letterSpacing: 2, textTransform: "uppercase", marginBottom: 6 }}>Annual Edition · 2025/26</div>
+                    <div style={{ fontFamily: "'Libre Baskerville', serif", fontSize: 24, color: "#fff", lineHeight: 1.15, marginBottom: 4 }}>
+                      Uni<span style={{ color: "#a8d0ff" }}>Voice</span>
+                    </div>
+                    <div style={{ width: 36, height: 2, background: "#4fa3f7", borderRadius: 2, marginBottom: 14 }} />
+                    <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
+                      {[["🤖","AI in Healthcare"],["☀️","Solar Innovation"],["🎨","Arts & Culture"],["📚","Student Research"]].map(([icon, label]) => (
+                        <div key={label} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                          <span style={{ fontSize: 11 }}>{icon}</span>
+                          <span style={{ fontSize: 9.5, color: "rgba(255,255,255,.8)", lineHeight: 1 }}>{label}</span>
+                        </div>
+                      ))}
+                    </div>
+                    {/* Issue badge */}
+                    <div style={{ position: "absolute", bottom: 14, left: 14, background: "rgba(255,255,255,.12)", border: "1px solid rgba(255,255,255,.2)", borderRadius: 20, padding: "3px 10px", fontSize: 9, color: "rgba(255,255,255,.75)", letterSpacing: 1 }}>
+                      ISSUE 01
+                    </div>
+                  </div>
+                  {/* Page edge lines */}
+                  {[...Array(3)].map((_, i) => (
+                    <div key={i} style={{ position: "absolute", top: 6 + i * 2, left: 162 + i * 2, width: 4, height: 208, background: i === 0 ? "#c8ddf8" : i === 1 ? "#e0ecfa" : "#f0f6ff", borderRadius: "0 2px 2px 0" }} />
+                  ))}
+                </div>
+              </div>
             </div>
           </div>
         </div>

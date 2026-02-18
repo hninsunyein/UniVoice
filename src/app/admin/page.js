@@ -24,8 +24,8 @@ const sidebarConfig = {
       title: "Management",
       items: [
         { icon: "📅", label: "Closure Dates", href: "/admin/closure" },
-        { icon: "👤", label: "Users", href: "#" },
-        { icon: "🏫", label: "Faculties", href: "#" },
+        { icon: "👤", label: "Users", href: "/admin/users" },
+        { icon: "🏫", label: "Faculties", href: "/admin/faculties" },
       ],
     },
   ],

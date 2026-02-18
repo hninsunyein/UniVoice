@@ -69,7 +69,7 @@ body {
 
 /* ─── TOPBAR ─── */
 .topbar {
-  background: var(--navy);
+  background: var(--navy-mid);
   height: 64px;
   display: flex;
   align-items: center;
@@ -370,7 +370,7 @@ body {
 }
 .login-left {
   flex: 1 1 50%;
-  background: linear-gradient(160deg, var(--navy) 0%, var(--navy-light) 40%, var(--blue) 100%);
+  background: var(--navy);
   padding: 72px 64px;
   display: flex;
   flex-direction: column;
@@ -731,7 +731,7 @@ body {
   height: 280px;
   border: 2px solid var(--lp-line);
   border-radius: 12px;
-  background: var(--lp-white);
+  background: var(--lp-sky);
   display: flex;
   align-items: center;
   justify-content: center;
