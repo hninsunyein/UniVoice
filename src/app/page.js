@@ -77,7 +77,7 @@ export default function LandingPage() {
               <button className="lp-hero-cta" onClick={scrollToMagazines}>Read Magazine</button>
             </div>
             <div className="lp-hero-right">
-              <div className="lp-hero-image"></div>
+              <div className="lp-article-image"></div>
             </div>
           </div>
         </div>
