@@ -1,41 +1,58 @@
 "use client";
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { login } from "@/lib/auth";
+import { clearTokens } from "@/lib/api";
 
-export default function LoginPage() {
-  const [email,    setEmail]    = useState("");
+const ADMIN_ROLES = ["ADMIN", "SUPER_ADMIN", "admin", "super_admin"];
+
+export default function AdminLoginPage() {
+  const router = useRouter();
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [agreed,   setAgreed]   = useState(false);
-  const [error,    setError]    = useState("");
-  const [loading,  setLoading]  = useState(false);
+  const [agreed, setAgreed] = useState(false);
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
 
   const handleLogin = async () => {
     setError("");
-    if (!agreed) { setError("You must agree to the Terms & Conditions to continue."); return; }
-    if (!email.trim()) { setError("Please enter your email address."); return; }
-    if (!password) { setError("Please enter your password."); return; }
+    if (!agreed) {
+      setError("You must agree to the Terms & Conditions to continue.");
+      return;
+    }
+    if (!email || !password) {
+      setError("Please enter your email and password.");
+      return;
+    }
 
     setLoading(true);
     try {
-      const result = await login(email.trim(), password);
+      const result = await login(email, password);
 
       if (result.requiresPasswordChange) {
         window.location.href = `/change-password?firstLogin=true&email=${encodeURIComponent(result.email)}`;
         return;
       }
 
+      const role = result.user?.roleName || result.user?.role || "";
+      if (!ADMIN_ROLES.includes(role)) {
+        clearTokens();
+        setError("Access denied. This login is for administrators only.");
+        setLoading(false);
+        return;
+      }
+
       window.location.href = result.path;
     } catch (err) {
-      setError(err.message || "Login failed. Please check your credentials.");
+      setError(err.message || "Login failed. Please try again.");
       setLoading(false);
     }
   };
 
   return (
     <div className="login-outer">
-
-      {/* ── Left branding panel ── */}
+      {/* Left branding panel */}
       <div className="login-left">
         <h1>Uni<em>Voice</em><br />Magazine Portal</h1>
         <p>
@@ -63,20 +80,19 @@ export default function LoginPage() {
         </div>
       </div>
 
-      {/* ── Right form panel ── */}
+      {/* Right form panel */}
       <div className="login-right">
-        <h2>Welcome</h2>
-        <p className="login-sub">Sign in with your university credentials</p>
+        <h2>Welcome Admin</h2>
+        <p className="login-sub">Sign in to access the administration panel</p>
 
         <div className="fgroup">
-          <label>University Email</label>
+          <label>Administrator Email</label>
           <input
             type="email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            placeholder="you@university.ac.uk"
+            placeholder="admin@university.ac.uk"
             disabled={loading}
-            onKeyDown={(e) => e.key === "Enter" && handleLogin()}
           />
         </div>
 

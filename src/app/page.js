@@ -1,293 +1,262 @@
 "use client";
-import { useState, useRef } from "react";
+import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
+import { login } from "@/lib/auth";
+import { listFaculties } from "@/lib/services/faculties";
 
-const facultyMagazines = [
-  { emoji: "🤖", title: "Engineering & Innovation", meta: "24 selected articles · Faculty of Engineering", desc: "AI, robotics, sustainability, and cutting-edge engineering research — all selected for publication.", year: "2025/26", bg: "" },
-  { emoji: "🔬", title: "Science & Discovery", meta: "19 selected articles · Faculty of Science", desc: "Student research on climate, nanotechnology, and modern science breakthroughs.", year: "2025/26", bg: "linear-gradient(135deg,#c8e8d8,#a0d0b8)" },
-  { emoji: "🎨", title: "Arts & Humanities", meta: "15 selected articles · Faculty of Arts", desc: "Creative storytelling, cultural analysis, and artistic expression.", year: "2025/26", bg: "linear-gradient(135deg,#e8d8f8,#d0b8f0)" },
-  { emoji: "💼", title: "Business & Economics", meta: "17 selected articles · Faculty of Business", desc: "Startup culture, economic trends, and innovative business strategies.", year: "2025/26", bg: "linear-gradient(135deg,#f8e8c8,#f0d0a0)" },
-  { emoji: "📚", title: "Education & Society", meta: "12 selected articles · Faculty of Education", desc: "Inclusive teaching, educational innovation, and social impact research.", year: "2025/26", bg: "linear-gradient(135deg,#f8c8c8,#f0a0a0)" },
-  { emoji: "📖", title: "Archive – Last Year", meta: "89 selected articles · All Faculties", desc: "Browse the complete selected collection from 2024/25.", year: "2024/25", bg: "linear-gradient(135deg,#c8f0f8,#a0e0f0)" },
+const emojiPool = ["🤖", "🔬", "🎨", "💼", "📚", "🏗️", "🌿", "☀️"];
+const bgPool = [
+  "linear-gradient(135deg,#c8ddf8,#a0c4f0)",
+  "linear-gradient(135deg,#c8e8d8,#a0d0b8)",
+  "linear-gradient(135deg,#e8d8f8,#d0b8f0)",
+  "linear-gradient(135deg,#f8e8c8,#f0d0a0)",
+  "linear-gradient(135deg,#f8c8c8,#f0a0a0)",
+  "linear-gradient(135deg,#c8f0f8,#a0e0f0)",
+  "linear-gradient(135deg,#d8f0c8,#b8e0a0)",
+  "linear-gradient(135deg,#f0d8f8,#e0b8f0)",
 ];
 
-const guestArticles = [
-  { emoji: "🤖", title: "AI in Healthcare: A New Frontier", meta: "Hnin Su Nyein · Selected 12 Jan 2026", desc: "Exploring artificial intelligence applications in modern healthcare and patient diagnosis systems.", bg: "" },
-  { emoji: "☀️", title: "Solar Panel Innovation 2025", meta: "Ko Aung Kyaw · Selected 14 Feb 2026", desc: "Next-generation solar technology and sustainable energy solutions for urban environments.", bg: "linear-gradient(135deg,#f8e8c8,#f0d0a0)" },
-  { emoji: "🤖", title: "Robotics Club Showcase 2025", meta: "Ma Thin Zar · Selected 10 Feb 2026", desc: "Student-built autonomous robots and competition highlights from this academic year.", bg: "linear-gradient(135deg,#e8d8f8,#d0b8f0)" },
-  { emoji: "💧", title: "Clean Water Engineering Projects", meta: "Daw Aye Aye · Selected 08 Feb 2026", desc: "Community-focused engineering solutions for clean water access in rural Myanmar.", bg: "linear-gradient(135deg,#c8f0f8,#a0e0f0)" },
-];
+function fmtDate(d) {
+  if (!d) return "—";
+  return new Date(d).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
+}
 
 export default function LandingPage() {
-  const [showDemoModal, setShowDemoModal] = useState(false);
-  const [isGuestMode, setIsGuestMode] = useState(false);
-  const [selectedFaculty, setSelectedFaculty] = useState("");
-  const [demoFaculty, setDemoFaculty] = useState("");
-  const [showDetail, setShowDetail] = useState(false);
-  const [detailArticle, setDetailArticle] = useState({ title: "", author: "", initial: "" });
+  const [faculties,       setFaculties]       = useState([]);
+  const [showModal,       setShowModal]       = useState(false);
+  const [guestEmail,      setGuestEmail]      = useState("");
+  const [guestFacultyId,  setGuestFacultyId]  = useState("");
+  const [guestLoading,    setGuestLoading]    = useState(false);
+  const [modalError,      setModalError]      = useState("");
+  const [pendingFacultyId, setPendingFacultyId] = useState(null);
   const magRef = useRef(null);
 
-  const scrollToMagazines = () => {
-    magRef.current?.scrollIntoView({ behavior: "smooth" });
+  useEffect(() => {
+    listFaculties()
+      .then((res) => {
+        const facs = Array.isArray(res) ? res : (Array.isArray(res?.data) ? res.data : []);
+        if (facs.length > 0) {
+          setFaculties(facs);
+          setGuestFacultyId(facs[0].facultyId);
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  const openModal = () => {
+    setModalError("");
+    setGuestEmail("");
+    setPendingFacultyId(null);
+    if (faculties.length > 0) setGuestFacultyId(faculties[0].facultyId);
+    setShowModal(true);
   };
 
-  const handleDemoLogin = () => {
-    if (!demoFaculty) {
-      alert("Please choose a faculty");
-      return;
+  const openModalForFaculty = (facultyId) => {
+    setModalError("");
+    setGuestEmail("");
+    setPendingFacultyId(facultyId);
+    setGuestFacultyId(facultyId);
+    setShowModal(true);
+  };
+
+  const handleGuestLogin = async () => {
+    if (!guestEmail.trim()) { setModalError("Please enter your email address."); return; }
+    if (!guestFacultyId)    { setModalError("Please select a faculty."); return; }
+    setGuestLoading(true);
+    setModalError("");
+    try {
+      const result = await login(guestEmail.trim(), undefined, guestFacultyId);
+      if (result.requiresPasswordChange) {
+        window.location.href = `/change-password?firstLogin=true&email=${encodeURIComponent(result.email)}`;
+        return;
+      }
+      window.location.href = pendingFacultyId
+        ? `/magazine/${pendingFacultyId}`
+        : result.path;
+    } catch (err) {
+      setModalError(err.message || "Login failed. Please check your details.");
+      setGuestLoading(false);
     }
-    setSelectedFaculty(demoFaculty);
-    setIsGuestMode(true);
-    setShowDemoModal(false);
-    setTimeout(() => magRef.current?.scrollIntoView({ behavior: "smooth" }), 100);
-  };
-
-  const openArticleDetail = (title, author) => {
-    setDetailArticle({ title, author, initial: author.charAt(0) });
-    setShowDetail(true);
-    window.scrollTo(0, 0);
-  };
-
-  const closeDetail = () => {
-    setShowDetail(false);
-    window.scrollTo(0, 0);
   };
 
   return (
     <div className="landing-page">
-      {/* HEADER */}
+
+      {/* ── HEADER ── */}
       <div className="lp-header">
         <div className="lp-logo">Uni<span>Voice</span></div>
         <div className="lp-header-right">
-          <button className="lp-guest-btn" onClick={() => setShowDemoModal(true)}>👁 Guest Access</button>
+          <button className="lp-guest-btn" onClick={openModal}>👁 Guest Access</button>
           <Link href="/login" className="lp-login-btn" style={{ textDecoration: "none" }}>Sign In</Link>
         </div>
       </div>
 
-      {/* HERO - hidden when viewing article detail */}
-      {!showDetail && (
-        <div className="lp-hero">
-          <div className="lp-hero-container">
-            <div className="lp-hero-left">
-              <h1 className="lp-hero-title">Your Best Value Proposition</h1>
-              <p className="lp-hero-text">
-                Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor
-                incididunt ut labore et dolore magna aliqua.
-              </p>
-              <button className="lp-hero-cta" onClick={scrollToMagazines}>Read Magazine</button>
-            </div>
-            <div className="lp-hero-right">
-              <div className="lp-hero-image">
-                {/* Magazine stack mockup */}
-                <div style={{ position: "relative", width: 220, height: 260 }}>
-                  {/* Back magazine (shadow) */}
-                  <div style={{
-                    position: "absolute", top: 12, left: 20,
-                    width: 160, height: 220, borderRadius: 8,
-                    background: "linear-gradient(160deg,#0a2d6a,#1455a8)",
-                    boxShadow: "4px 4px 16px rgba(13,61,138,.25)",
-                    transform: "rotate(4deg)"
-                  }} />
-                  {/* Front magazine cover */}
-                  <div style={{
-                    position: "absolute", top: 0, left: 0,
-                    width: 160, height: 220, borderRadius: 8,
-                    background: "linear-gradient(160deg,#0d3d8a 0%,#1a6fc4 55%,#4fa3f7 100%)",
-                    boxShadow: "6px 10px 28px rgba(13,61,138,.35)",
-                    padding: "18px 14px",
-                    display: "flex", flexDirection: "column",
-                    overflow: "hidden"
-                  }}>
-                    {/* Decorative circle */}
-                    <div style={{ position: "absolute", top: -24, right: -24, width: 90, height: 90, borderRadius: "50%", background: "rgba(255,255,255,.07)" }} />
-                    <div style={{ position: "absolute", bottom: -16, right: -16, width: 70, height: 70, borderRadius: "50%", background: "rgba(255,255,255,.05)" }} />
+      {/* ── HERO ── */}
+      <div className="lp-hero">
+        <div className="lp-hero-container">
+          <div className="lp-hero-left">
+            <h1 className="lp-hero-title">University Magazine Portal</h1>
+            <p className="lp-hero-text">
+              The official platform for student contributions to the university&apos;s
+              annual magazine. Browse selected articles by faculty and be part of
+              the academic community.
+            </p>
+            <button
+              className="lp-hero-cta"
+              onClick={() => magRef.current?.scrollIntoView({ behavior: "smooth" })}
+            >
+              Explore Magazines
+            </button>
+          </div>
 
-                    <div style={{ fontSize: 9, color: "rgba(255,255,255,.55)", letterSpacing: 2, textTransform: "uppercase", marginBottom: 6 }}>Annual Edition · 2025/26</div>
-                    <div style={{ fontFamily: "'Libre Baskerville', serif", fontSize: 24, color: "#fff", lineHeight: 1.15, marginBottom: 4 }}>
-                      Uni<span style={{ color: "#a8d0ff" }}>Voice</span>
-                    </div>
-                    <div style={{ width: 36, height: 2, background: "#4fa3f7", borderRadius: 2, marginBottom: 14 }} />
-                    <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
-                      {[["🤖","AI in Healthcare"],["☀️","Solar Innovation"],["🎨","Arts & Culture"],["📚","Student Research"]].map(([icon, label]) => (
-                        <div key={label} style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                          <span style={{ fontSize: 11 }}>{icon}</span>
-                          <span style={{ fontSize: 9.5, color: "rgba(255,255,255,.8)", lineHeight: 1 }}>{label}</span>
-                        </div>
-                      ))}
-                    </div>
-                    {/* Issue badge */}
-                    <div style={{ position: "absolute", bottom: 14, left: 14, background: "rgba(255,255,255,.12)", border: "1px solid rgba(255,255,255,.2)", borderRadius: 20, padding: "3px 10px", fontSize: 9, color: "rgba(255,255,255,.75)", letterSpacing: 1 }}>
-                      ISSUE 01
-                    </div>
+          <div className="lp-hero-right">
+            <div className="lp-hero-image">
+              <div style={{ position: "relative", width: 220, height: 260 }}>
+                <div style={{ position: "absolute", top: 12, left: 20, width: 160, height: 220, borderRadius: 8, background: "linear-gradient(160deg,#0a2d6a,#1455a8)", boxShadow: "4px 4px 16px rgba(13,61,138,.25)", transform: "rotate(4deg)" }} />
+                <div style={{ position: "absolute", top: 0, left: 0, width: 160, height: 220, borderRadius: 8, background: "linear-gradient(160deg,#0d3d8a 0%,#1a6fc4 55%,#4fa3f7 100%)", boxShadow: "6px 10px 28px rgba(13,61,138,.35)", padding: "18px 14px", display: "flex", flexDirection: "column", overflow: "hidden" }}>
+                  <div style={{ position: "absolute", top: -24, right: -24, width: 90, height: 90, borderRadius: "50%", background: "rgba(255,255,255,.07)" }} />
+                  <div style={{ fontSize: 9, color: "rgba(255,255,255,.55)", letterSpacing: 2, textTransform: "uppercase", marginBottom: 6 }}>Annual Edition · 2025/26</div>
+                  <div style={{ fontFamily: "'Libre Baskerville', serif", fontSize: 24, color: "#fff", lineHeight: 1.15, marginBottom: 4 }}>Uni<span style={{ color: "#a8d0ff" }}>Voice</span></div>
+                  <div style={{ width: 36, height: 2, background: "#4fa3f7", borderRadius: 2, marginBottom: 14 }} />
+                  <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
+                    {[["🤖","AI in Healthcare"],["☀️","Solar Innovation"],["🎨","Arts & Culture"],["📚","Student Research"]].map(([icon, label]) => (
+                      <div key={label} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                        <span style={{ fontSize: 11 }}>{icon}</span>
+                        <span style={{ fontSize: 9.5, color: "rgba(255,255,255,.8)", lineHeight: 1 }}>{label}</span>
+                      </div>
+                    ))}
                   </div>
-                  {/* Page edge lines */}
-                  {[...Array(3)].map((_, i) => (
-                    <div key={i} style={{ position: "absolute", top: 6 + i * 2, left: 162 + i * 2, width: 4, height: 208, background: i === 0 ? "#c8ddf8" : i === 1 ? "#e0ecfa" : "#f0f6ff", borderRadius: "0 2px 2px 0" }} />
-                  ))}
+                  <div style={{ position: "absolute", bottom: 14, left: 14, background: "rgba(255,255,255,.12)", border: "1px solid rgba(255,255,255,.2)", borderRadius: 20, padding: "3px 10px", fontSize: 9, color: "rgba(255,255,255,.75)", letterSpacing: 1 }}>ISSUE 01</div>
+                </div>
+                {[...Array(3)].map((_, i) => (
+                  <div key={i} style={{ position: "absolute", top: 6 + i * 2, left: 162 + i * 2, width: 4, height: 208, background: i === 0 ? "#c8ddf8" : i === 1 ? "#e0ecfa" : "#f0f6ff", borderRadius: "0 2px 2px 0" }} />
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* ── MAGAZINES ── */}
+      <div className="lp-magazines-section" ref={magRef}>
+        <div className="lp-section-header">
+          <h2 className="lp-section-title">Explore Our Magazines</h2>
+          <p className="lp-section-subtitle">Browse selected contributions by faculty — sign in to read full articles</p>
+        </div>
+
+        {faculties.length === 0 ? (
+          <div className="lp-mag-grid">
+            {[...Array(4)].map((_, i) => (
+              <div key={i} className="lp-mag-card" style={{ pointerEvents: "none" }}>
+                <div style={{ height: 180, background: "linear-gradient(135deg,#e8f0fb,#d4e5f8)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 40, opacity: .4 }}>📰</div>
+                <div style={{ padding: "16px 18px" }}>
+                  <div style={{ height: 13, background: "#e8eef6", borderRadius: 6, marginBottom: 8, width: "65%" }} />
+                  <div style={{ height: 10, background: "#f0f4fa", borderRadius: 5, width: "45%" }} />
                 </div>
               </div>
-            </div>
+            ))}
           </div>
-        </div>
-      )}
-
-      {/* GUEST WELCOME */}
-      {!showDetail && isGuestMode && (
-        <div className="lp-welcome-section">
-          <div className="lp-welcome-box" style={{ borderLeft: "3px solid #4a90e0" }}>
-            <span className="lp-welcome-icon">👁</span>
-            <h2 className="lp-welcome-title">Guest Access — {selectedFaculty} Faculty</h2>
-            <p className="lp-welcome-text" style={{ background: "#e8f1fd", padding: "12px 16px", borderRadius: 8, fontSize: 13, color: "#0d3d8a" }}>
-              <strong>ℹ️ Read-Only Access:</strong> You are viewing selected contributions for the Faculty of {selectedFaculty}.
-              You cannot edit, comment, or download files.
-            </p>
-            <div className="lp-info-grid">
-              <div className="lp-info-item">
-                <span className="lp-info-icon">✅</span>
-                <div className="lp-info-label">Selected Articles</div>
-                <div className="lp-info-value">24 articles</div>
-              </div>
-              <div className="lp-info-item">
-                <span className="lp-info-icon">🖼️</span>
-                <div className="lp-info-label">Images</div>
-                <div className="lp-info-value">47 photos</div>
-              </div>
-              <div className="lp-info-item">
-                <span className="lp-info-icon">📅</span>
-                <div className="lp-info-label">Academic Year</div>
-                <div className="lp-info-value">2025/26</div>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* MAGAZINES SECTION */}
-      {!showDetail && (
-        <div className="lp-magazines-section" ref={magRef}>
-          <div className="lp-section-header">
-            <h2 className="lp-section-title">
-              {isGuestMode ? `${selectedFaculty} Faculty — Selected Articles` : "Explore Our Magazines"}
-            </h2>
-            <p className="lp-section-subtitle">
-              {isGuestMode
-                ? `Viewing selected contributions for Faculty of ${selectedFaculty} only (Read-Only)`
-                : "Browse selected contributions by faculty — Academic Year 2025/26"}
-            </p>
-          </div>
-
-          {/* Normal grid (non-guest) */}
-          {!isGuestMode && (
-            <div className="lp-mag-grid">
-              {facultyMagazines.map((mag, i) => (
-                <div
-                  key={i}
-                  className="lp-mag-card"
-                  onClick={i === 0 ? () => openArticleDetail("How to Spend the Perfect Day on Croatia's Most Magical Island", "Hnin Su Nyein") : undefined}
-                >
-                  <div className="lp-mag-cover" style={mag.bg ? { background: mag.bg } : {}}>
-                    <span className="lp-mag-year">{mag.year}</span>
-                    {mag.emoji}
-                  </div>
-                  <div className="lp-mag-info">
-                    <div className="lp-mag-title">{mag.title}</div>
-                    <div className="lp-mag-meta">{mag.meta}</div>
-                    <div className="lp-mag-desc">{mag.desc}</div>
-                    <button className="lp-read-btn">{i === 5 ? "View Archive →" : "Read Selected Articles →"}</button>
-                  </div>
+        ) : (
+          <div className="lp-mag-grid">
+            {faculties.map((faculty, i) => (
+              <div
+                key={faculty.facultyId}
+                className="lp-mag-card"
+                onClick={() => openModalForFaculty(faculty.facultyId)}
+                style={{ cursor: "pointer" }}
+              >
+                <div className="lp-mag-cover" style={{ background: bgPool[i % bgPool.length] }}>
+                  <span className="lp-mag-year">2025/26</span>
+                  {emojiPool[i % emojiPool.length]}
                 </div>
-              ))}
-            </div>
-          )}
-
-          {/* Guest grid */}
-          {isGuestMode && (
-            <div className="lp-mag-grid">
-              {guestArticles.map((art, i) => (
-                <div
-                  key={i}
-                  className="lp-mag-card"
-                  onClick={() => openArticleDetail(art.title, art.meta.split(" · ")[0])}
-                >
-                  <div className="lp-mag-cover" style={art.bg ? { background: art.bg } : {}}>
-                    <span className="lp-mag-year">2025/26</span>
-                    {art.emoji}
+                <div className="lp-mag-info">
+                  <div className="lp-mag-title">{faculty.facultyName}</div>
+                  <div className="lp-mag-meta">Selected articles · Academic Year 2025/26</div>
+                  <div className="lp-mag-desc">
+                    Student-authored articles selected by the faculty coordinator for the university&apos;s annual magazine.
                   </div>
-                  <div className="lp-mag-info">
-                    <div className="lp-mag-title">{art.title}</div>
-                    <div className="lp-mag-meta">{art.meta}</div>
-                    <div className="lp-mag-desc">{art.desc}</div>
-                    <button className="lp-read-btn">Read Article →</button>
-                  </div>
+                  <button
+                    className="lp-read-btn"
+                    onClick={(e) => { e.stopPropagation(); openModalForFaculty(faculty.facultyId); }}
+                  >
+                    Read More →
+                  </button>
                 </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* ARTICLE DETAIL VIEW */}
-      {showDetail && (
-        <div className="lp-article-detail">
-          <div className="lp-breadcrumb">
-            <button onClick={closeDetail}>← Back to Magazines</button> / {isGuestMode ? `${selectedFaculty} Faculty` : "Engineering & Innovation"}
-          </div>
-          <div className="lp-article-header">
-            <h1 className="lp-article-title">{detailArticle.title}</h1>
-            <div className="lp-article-meta">
-              <div className="lp-article-author">
-                <div className="lp-author-av">{detailArticle.initial}</div>
-                <span>{detailArticle.author}</span>
               </div>
-              <span>·</span>
-              <span>12 Jan 2026</span>
-              <span>·</span>
-              <span>Faculty of Engineering</span>
-            </div>
+            ))}
           </div>
-          <div className="lp-article-image">🏝️</div>
-          <div className="lp-article-content">
-            <p>
-              Your article you will be rendered with the uploaded care of Europeans islands when the going
-              trip, snaking a country afternoon with the place. For years, snaking a country afternoon with the place.
-            </p>
-            <p>
-              A wonderful serenity has taken possession of my entire soul, like these sweet mornings of spring which I enjoy with my whole heart. I am alone, and feel the charm of existence in this spot, which was created for the bliss of souls like mine. So these sweet mornings of spring which I enjoy with my whole heart look at the hills and the ocean.
-            </p>
-            <p>
-              The three most stressful life events of cycling adults often ship into town and across lands, but I am so happy, my dear friend, so absorbed in the exquisite sense of mere tranquil existence, that I neglect my talents.
-            </p>
-          </div>
-        </div>
-      )}
+        )}
+      </div>
 
-      {/* FOOTER */}
+      {/* ── FOOTER ── */}
       <div className="lp-footer">
         <p>© 2026 University Magazine Portal · UniVoice · <a href="#">Terms</a> · <a href="#">Privacy</a></p>
       </div>
 
-      {/* DEMO/GUEST LOGIN MODAL */}
-      {showDemoModal && (
-        <div className="lp-modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) setShowDemoModal(false); }}>
+      {/* ── GUEST ACCESS MODAL ── */}
+      {showModal && (
+        <div
+          className="lp-modal-overlay"
+          onClick={(e) => { if (e.target === e.currentTarget) setShowModal(false); }}
+        >
           <div className="lp-demo-card">
-            <button className="lp-modal-close" onClick={() => setShowDemoModal(false)}>✕</button>
-            <div className="lp-demo-icon-circle">🎓</div>
-            <h2 className="lp-demo-title">Demo user</h2>
-            <p className="lp-demo-subtitle">Choose your faculty to view articles</p>
+            <button className="lp-modal-close" onClick={() => setShowModal(false)}>✕</button>
+
+            <div className="lp-demo-icon-circle">👁</div>
+            <h2 className="lp-demo-title">Guest Access</h2>
+            <p className="lp-demo-subtitle">
+              {pendingFacultyId
+                ? `Sign in as a guest to read ${faculties.find((f) => f.facultyId === pendingFacultyId)?.facultyName || "this faculty"}'s articles`
+                : "Enter your email and select a faculty to continue"}
+            </p>
+
+            <div className="lp-demo-field">
+              <label>Email Address</label>
+              <input
+                type="email"
+                value={guestEmail}
+                onChange={(e) => setGuestEmail(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && handleGuestLogin()}
+                placeholder="guest@university.ac.uk"
+                autoFocus
+                disabled={guestLoading}
+                style={{ width: "100%", border: "1.5px solid var(--lp-line)", borderRadius: 8, padding: "11px 14px", fontFamily: "'DM Sans', sans-serif", fontSize: 14, color: "var(--lp-text)", background: "#fff", outline: "none" }}
+              />
+            </div>
+
             <div className="lp-demo-field">
               <label>Faculty</label>
-              <select value={demoFaculty} onChange={(e) => setDemoFaculty(e.target.value)}>
-                <option value="">Choose faculty</option>
-                <option value="Engineering">Engineering</option>
-                <option value="Science">Science</option>
-                <option value="Business">Business</option>
-                <option value="Arts">Arts & Humanities</option>
-                <option value="Education">Education</option>
+              <select
+                value={guestFacultyId}
+                onChange={(e) => setGuestFacultyId(e.target.value)}
+                disabled={guestLoading || faculties.length === 0}
+              >
+                {faculties.length === 0
+                  ? <option value="">Loading…</option>
+                  : faculties.map((f) => (
+                      <option key={f.facultyId} value={f.facultyId}>{f.facultyName}</option>
+                    ))
+                }
               </select>
             </div>
-            <button className="lp-demo-login-btn" onClick={handleDemoLogin}>Demo Log in</button>
+
+            {modalError && (
+              <div style={{ background: "#fdeaea", border: "1px solid #f0b8b8", borderRadius: 8, padding: "10px 14px", marginBottom: 14, fontSize: 13, color: "#b52a2a", display: "flex", gap: 8, alignItems: "center", textAlign: "left" }}>
+                <span>⚠️</span><span>{modalError}</span>
+              </div>
+            )}
+
+            <button
+              className="lp-demo-login-btn"
+              onClick={handleGuestLogin}
+              disabled={guestLoading || !guestEmail.trim() || !guestFacultyId}
+              style={{ opacity: guestLoading || !guestEmail.trim() || !guestFacultyId ? 0.6 : 1 }}
+            >
+              {guestLoading ? "Signing in…" : "Continue →"}
+            </button>
+
             <div className="lp-demo-footer">
-              Already have an account? <Link href="/login">Sign in</Link>
+              Staff or student? <Link href="/login" onClick={() => setShowModal(false)}>Sign in here</Link>
             </div>
           </div>
         </div>
