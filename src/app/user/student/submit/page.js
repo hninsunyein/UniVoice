@@ -1,5 +1,5 @@
 "use client";
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Topbar from "@/components/Topbar";
 import Sidebar from "@/components/Sidebar";
@@ -17,7 +17,7 @@ const ACCEPTED_DOC_TYPES = [".doc", ".docx", ".pdf", ".odt"];
 const ACCEPTED_IMG_TYPES = [".jpg", ".jpeg", ".png", ".gif", ".webp"];
 const MAX_IMAGES = 1;
 
-export default function SubmitContribution() {
+function SubmitContributionInner() {
   const router       = useRouter();
   const searchParams = useSearchParams();
   const editId       = searchParams.get("edit");
@@ -582,5 +582,13 @@ export default function SubmitContribution() {
         </main>
       </div>
     </>
+  );
+}
+
+export default function SubmitContribution() {
+  return (
+    <Suspense>
+      <SubmitContributionInner />
+    </Suspense>
   );
 }
