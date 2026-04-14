@@ -2,7 +2,7 @@
 import { useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { requestPasswordReset, verifyOTP, confirmPasswordReset } from "@/lib/auth";
+import { requestPasswordReset, confirmPasswordReset } from "@/lib/auth";
 
 export default function ForgotPasswordPage() {
   const router = useRouter();
@@ -11,7 +11,6 @@ export default function ForgotPasswordPage() {
   const [step, setStep] = useState(1);
   const [email, setEmail] = useState("");
   const [otp, setOtp] = useState(["", "", "", "", "", ""]);
-  const [resetToken, setResetToken] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [error, setError] = useState("");
@@ -68,15 +67,7 @@ export default function ForgotPasswordPage() {
 
     setLoading(true);
     try {
-      // First verify OTP → get resetToken
-      let token = resetToken;
-      if (!token) {
-        const verifyResult = await verifyOTP(email, enteredOtp);
-        token = verifyResult?.resetToken || "";
-        setResetToken(token);
-      }
-      // Then confirm new password
-      await confirmPasswordReset(email, enteredOtp, token, newPassword, confirmPassword);
+      await confirmPasswordReset(email, enteredOtp, newPassword, confirmPassword);
       setStep(3);
     } catch (err) {
       setError(err.message || "Verification failed. Please check your OTP.");
@@ -87,7 +78,6 @@ export default function ForgotPasswordPage() {
 
   const handleResend = async () => {
     setOtp(["", "", "", "", "", ""]);
-    setResetToken("");
     setError("");
     setLoading(true);
     try {

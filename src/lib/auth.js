@@ -121,11 +121,10 @@ export const verifyOTP = async (email, otp) => {
 /**
  * Confirm new password after OTP verification
  */
-export const confirmPasswordReset = async (email, otp, resetToken, newPassword, confirmPassword) => {
+export const confirmPasswordReset = async (email, otp, newPassword, confirmPassword) => {
   const data = await post("/auth/password-reset/confirm", {
     email,
     otp,
-    resetToken,
     newPassword,
     confirmPassword,
   });

@@ -1,7 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "WebFetch(domain:ewsdapi-production.up.railway.app)"
-    ]
-  }
-}
