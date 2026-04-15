@@ -13,7 +13,7 @@ export const getUser = (id) => get(`/users/${id}`);
 export const createUser = (body) => post("/users", body);
 
 /** Create guest user (no password required) */
-export const createGuestUser = (body) => post("/users/guest", body);
+export const createGuestUser = (body) => post("/users/guest-logins", body);
 
 /** Update user account details */
 export const updateUser = (id, body) => patch(`/users/${id}/account`, body);

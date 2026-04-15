@@ -246,7 +246,7 @@ export default function UsersPage() {
     if (!createForm.username.trim()) { setFormError("Full name is required."); return; }
     if (!createForm.email.trim())    { setFormError("Email is required."); return; }
     if (!createForm.roleName)        { setFormError("User role is required."); return; }
-    if (!createForm.password)        { setFormError("Initial password is required."); return; }
+    if (!isGuest && !createForm.password) { setFormError("Initial password is required."); return; }
     if (FACULTY_REQUIRED_ROLES.includes(createForm.roleName) && !createForm.facultyId) {
       setFormError("Faculty is required for this role.");
       return;
@@ -260,8 +260,17 @@ export default function UsersPage() {
           username: createForm.username.trim(),
           email:    createForm.email.trim(),
           roleName: createForm.roleName,
-          password: createForm.password,
         };
+        payload.password = isGuest
+          ? (() => {
+              const upper = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+              const lower = "abcdefghijklmnopqrstuvwxyz";
+              const digit = "0123456789";
+              const rand  = (s) => s[Math.floor(Math.random() * s.length)];
+              const rest  = Array.from({ length: 5 }, () => rand(upper + lower + digit)).join("");
+              return rand(upper) + rand(lower) + rand(digit) + rest;
+            })()
+          : createForm.password;
         if (createForm.facultyId) payload.facultyId = createForm.facultyId;
         if (createForm.roleName === "STUDENT" && terms.length > 0) {
           payload.termsConditionsVerId = terms[0].termsConditionsVerId;
@@ -754,15 +763,17 @@ export default function UsersPage() {
                   {ROLES.filter(r => r.value !== "ADMIN").map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
                 </select>
               </div>
-              <div className="adm-field">
-                <label>Initial Password *</label>
-                <PasswordInput
-                  compact
-                  placeholder="Temporary password"
-                  value={createForm.password}
-                  onChange={e => setCreateForm(p => ({ ...p, password: e.target.value }))}
-                />
-              </div>
+              {createForm.roleName !== "GUEST" && (
+                <div className="adm-field">
+                  <label>Initial Password *</label>
+                  <PasswordInput
+                    compact
+                    placeholder="Temporary password"
+                    value={createForm.password}
+                    onChange={e => setCreateForm(p => ({ ...p, password: e.target.value }))}
+                  />
+                </div>
+              )}
               {FACULTY_REQUIRED_ROLES.includes(createForm.roleName) && (
                 <div className="adm-field">
                   <label>Faculty *</label>
