@@ -10,7 +10,7 @@ import {
 } from "@/lib/services/reports";
 import { listAcademicYears } from "@/lib/services/closures";
 import { listFaculties } from "@/lib/services/faculties";
-import { listUsers } from "@/lib/services/users";
+import { listContributions } from "@/lib/services/contributions";
 import { getUser, getAccessToken } from "@/lib/api";
 import { logout } from "@/lib/auth";
 import { useRouter } from "next/navigation";
@@ -148,6 +148,7 @@ function ExceptionTable({ items, showDays, emptyMessage }) {
     : items;
 
   return (
+    <div style={{ overflowX: "auto", WebkitOverflowScrolling: "touch" }}>
     <table className="data-table">
       <thead>
         <tr>
@@ -166,8 +167,16 @@ function ExceptionTable({ items, showDays, emptyMessage }) {
           return (
             <tr key={c.contributionId || c.id || i} style={{ background: critical ? "#fff5f5" : "inherit" }}>
               <td><strong>{c.contributionTitle || c.title || "—"}</strong></td>
-              <td>{c.studentName || c.user?.username || c.student?.username || "—"}</td>
-              <td>{c.facultyName || c.user?.faculty?.facultyName || c.faculty?.facultyName || "—"}</td>
+              <td>
+                {c.student?.user?.username || c.student?.user?.name ||
+                 c.studentName             || c.student?.username   ||
+                 c.user?.username          || "—"}
+              </td>
+              <td>
+                {c.student?.user?.faculty?.facultyName ||
+                 c.facultyName || c.faculty?.facultyName ||
+                 c.user?.faculty?.facultyName || "—"}
+              </td>
               <td>
                 {d ? new Date(d).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" }) : "—"}
               </td>
@@ -183,6 +192,7 @@ function ExceptionTable({ items, showDays, emptyMessage }) {
         })}
       </tbody>
     </table>
+    </div>
   );
 }
 
@@ -202,7 +212,6 @@ export default function AdminPage() {
   const [statsContributors, setStatsContributors] = useState(null); // top-level from /reports/statistics
   const [statsSelected,    setStatsSelected]  = useState(null); // top-level from /reports/statistics
   const [selectedCount,    setSelectedCount]  = useState(null);
-  const [guestCount,       setGuestCount]     = useState(null);
 
   /* Browser tracking */
   const [browserSessions, setBrowserSessions] = useState([]);
@@ -256,33 +265,17 @@ export default function AdminPage() {
     setLoadingStats(true);
     setLoadingExceptions(true);
     try {
-      const [summaryRes, statsRes, missingRes, overdueRes, facRes, guestRes] = await Promise.all([
+      const [summaryRes, statsRes, missingRes, overdueRes, facRes] = await Promise.all([
         getDashboardSummary().catch(()              => ({ success: false })),
         getStatistics(yearId || undefined).catch(() => ({ success: false })),
         getMissingComments().catch(()               => ({ success: false })),
         getOverdueComments().catch(()               => ({ success: false })),
         listFaculties().catch(()                    => ({ success: false, data: [] })),
-        listUsers({ role: "GUEST" }).catch(()       => ({ success: false })),
       ]);
 
       /* Faculty count — from /faculties table */
       const facList = toArray(Array.isArray(facRes) ? facRes : facRes.data);
       if (facList.length > 0) setFacultyCount(facList.length);
-
-      /* Guest user count — from /users?role=GUEST (users table) */
-      if (guestRes.success) {
-        const raw = guestRes.data;
-        const meta = raw?.pagination ?? raw?.meta ?? {};
-        const total = meta.totalCount ?? meta.total ?? raw?.totalCount ?? raw?.total ?? null;
-        const list =
-          Array.isArray(raw?.users)   ? raw.users   :
-          Array.isArray(raw?.items)   ? raw.items   :
-          Array.isArray(raw?.content) ? raw.content :
-          Array.isArray(raw?.list)    ? raw.list    :
-          Array.isArray(raw)          ? raw         : [];
-        const uniqueCount = new Set(list.map((u) => (u.email || "").toLowerCase()).filter(Boolean)).size;
-        setGuestCount(total ?? (uniqueCount > 0 ? uniqueCount : 0));
-      }
 
       /* Parse statistics response */
       const { faculties, summary: statsSummary } = statsRes.success
@@ -307,9 +300,34 @@ export default function AdminPage() {
       setLoadingStats(false);
       setLoadingExceptions(false);
     }
+    /* Fetch year-filtered selected count (non-blocking) */
+    fetchSelectedCount(yearId);
   };
 
-  /* Re-fetch only statistics when year filter changes */
+  /* Count selected contributions for a specific year directly from the contributions API.
+     This is the accurate year-filtered count — dashboard-summary returns a global total. */
+  const fetchSelectedCount = async (yearId) => {
+    try {
+      const params = {};
+      if (yearId) params.academicYearId = yearId;
+      const res = await listContributions(params).catch(() => ({ success: false }));
+      if (res.success !== false) {
+        const raw = res.data;
+        const items =
+          Array.isArray(raw?.contributions) ? raw.contributions :
+          Array.isArray(raw?.items)         ? raw.items         :
+          Array.isArray(raw)                ? raw               : [];
+        const selectedItems = items.filter((c) =>
+          (c.status || c.contributionStatus || c.statusName || "").toUpperCase() === "SELECTED"
+        );
+        console.log("[Admin] All contributions:", items.length, "| Selected:", selectedItems.length);
+        console.log("[Admin] Selected titles:", selectedItems.map((c) => c.contributionTitle || c.title || "(no title)"));
+        setSelectedCount(selectedItems.length);
+      }
+    } catch {}
+  };
+
+  /* Re-fetch statistics + year-filtered selected count when year changes */
   const fetchStatistics = async (yearId) => {
     setLoadingStats(true);
     try {
@@ -324,10 +342,13 @@ export default function AdminPage() {
     } finally {
       setLoadingStats(false);
     }
+    /* Fetch accurate selected count for this year (non-blocking) */
+    fetchSelectedCount(yearId);
   };
 
   const handleYearChange = (yearId) => {
     setSelectedYearId(yearId);
+    setSelectedCount(null); // reset while re-fetching
     fetchStatistics(yearId);
   };
 
@@ -395,28 +416,26 @@ export default function AdminPage() {
     );
   };
 
-  /* ── Derived totals ── */
+  /* ── Derived totals (field names confirmed from API docs) ──
+     Statistics API:       array of { facultyName, numberOfContributions, numberOfContributors, percentageOfContributions }
+     Dashboard Summary API: { totalUsers, faculties, academicYears, totalContributions, selectedContributions, pendingComments }
+  */
+
+  /* Total contributions: sum per-faculty from statistics, fall back to dashboard-summary.totalContributions */
   const totalContribAll = statistics.reduce((s, f) => s + (f.totalContributions || 0), 0)
-                          || summary?.totalContributions || summary?.contributions || 0;
+                          || summary?.totalContributions || 0;
 
-  /* Contributors: top-level from /reports/statistics (unique student IDs, server-counted).
-     Never sum per-faculty — that double-counts cross-faculty contributors. */
-  const totalContributors = statsContributors
-                            ?? summary?.totalContributors
-                            ?? summary?.contributors
-                            ?? (statistics.length > 0
-                                ? statistics.reduce((s, f) => s + (f.totalContributors || 0), 0)
-                                : null);
+  /* Contributors: sum per-faculty numberOfContributors (students belong to one faculty, no double-count) */
+  const totalContributors = statistics.length > 0
+    ? statistics.reduce((s, f) => s + (f.totalContributors || 0), 0)
+    : null;
 
-  /* Selected: top-level from /reports/statistics, then summary */
-  const totalSelectedAll = selectedCount
-                           ?? statsSelected
-                           ?? summary?.selectedContributions
-                           ?? summary?.totalSelected
-                           ?? summary?.selected
-                           ?? statistics.reduce((s, f) => s + (f.totalSelected || 0), 0);
-  /* Faculty count: from /faculties table, then statistics rows, then summary */
-  const totalFaculties   = facultyCount ?? (statistics.length || summary?.totalFaculties || summary?.faculties || null);
+  /* Selected: year-filtered count from contributions API (most accurate),
+     fall back to dashboard-summary.selectedContributions (global, not year-filtered) */
+  const totalSelectedAll = selectedCount ?? summary?.selectedContributions ?? statsSelected ?? 0;
+
+  /* Faculty count: from /faculties list (authoritative), fall back to summary.faculties */
+  const totalFaculties = facultyCount ?? summary?.faculties ?? null;
   const grandTotal       = totalContribAll || 1;
   const maxContributions = statistics.reduce((m, f) => Math.max(m, f.totalContributions || 0), 1);
 
@@ -452,7 +471,6 @@ export default function AdminPage() {
             </div>
             <div style={{ display: "flex", gap: 10 }}>
               <button className="btn btn-outline btn-sm" onClick={() => fetchAll(selectedYearId)}>↺ Refresh</button>
-              <button className="btn btn-danger btn-sm" onClick={handleLogout}>Log Out</button>
             </div>
           </div>
 
@@ -482,6 +500,50 @@ export default function AdminPage() {
           {/* ── STATISTICS TAB ── */}
           {activeTab === "statistics" && (
             <>
+              {/* ── Summary Cards ── */}
+              <div className="card" style={{ marginBottom: 20 }}>
+                <div className="ch">
+                  <div>
+                    <div className="ch-title">Summary</div>
+                    <div className="ch-sub">Data filtered by academic year</div>
+                  </div>
+                  <select
+                    value={selectedYearId}
+                    onChange={(e) => handleYearChange(e.target.value)}
+                    style={{ fontSize: 13, padding: "5px 10px", border: "1.5px solid var(--border)", borderRadius: 6, color: "var(--text)", background: "#fff", fontFamily: "inherit" }}
+                  >
+                    <option value="">All Academic Years</option>
+                    {academicYears.map((y) => (
+                      <option key={y.academicYearId} value={y.academicYearId}>{ayLabel(y)}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="cb" style={{ paddingTop: 0 }}>
+                  <div className="stats" style={{ marginBottom: 0 }}>
+                    <div className="stat">
+                      <div className="stat-n">{loadingStats ? "…" : totalContribAll ?? "—"}</div>
+                      <div className="stat-l">Total Contributions</div>
+                    </div>
+                    <div className="stat blue">
+                      <div className="stat-n">{loadingStats ? "…" : totalContributors ?? "—"}</div>
+                      <div className="stat-l">Contributors</div>
+                    </div>
+                    <div className="stat green">
+                      <div className="stat-n">{loadingStats ? "…" : totalSelectedAll ?? "—"}</div>
+                      <div className="stat-l">Selected</div>
+                    </div>
+                    <div className="stat">
+                      <div className="stat-n">{loadingStats ? "…" : summary?.totalUsers ?? "—"}</div>
+                      <div className="stat-l">Total Users</div>
+                    </div>
+                    <div className="stat">
+                      <div className="stat-n">{loadingStats ? "…" : totalFaculties ?? "—"}</div>
+                      <div className="stat-l">Faculties</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
               {/* Contributions by Faculty */}
               <div className="card" style={{ marginBottom: 20 }}>
                 <div className="ch">
@@ -491,25 +553,13 @@ export default function AdminPage() {
                       {yearLabel} · {totalContribAll} contribution{totalContribAll !== 1 ? "s" : ""} · {totalContributors || "?"} contributor{totalContributors !== 1 ? "s" : ""}
                     </div>
                   </div>
-                  <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                    <select
-                      value={selectedYearId}
-                      onChange={(e) => handleYearChange(e.target.value)}
-                      style={{ fontSize: 13, padding: "5px 10px", border: "1.5px solid var(--border)", borderRadius: 6, color: "var(--text)", background: "#fff", fontFamily: "inherit" }}
-                    >
-                      <option value="">All Academic Years</option>
-                      {academicYears.map((y) => (
-                        <option key={y.academicYearId} value={y.academicYearId}>{ayLabel(y)}</option>
-                      ))}
-                    </select>
-                    <button
-                      className="btn btn-outline btn-sm"
-                      onClick={exportStatisticsCSV}
-                      disabled={statistics.length === 0}
-                    >
-                      Export CSV
-                    </button>
-                  </div>
+                  <button
+                    className="btn btn-outline btn-sm"
+                    onClick={exportStatisticsCSV}
+                    disabled={statistics.length === 0}
+                  >
+                    Export CSV
+                  </button>
                 </div>
 
                 {loadingStats ? (
@@ -543,6 +593,7 @@ export default function AdminPage() {
                     </div>
 
                     {/* Statistics table: Faculty · Contributions · % · Contributors */}
+                    <div style={{ overflowX: "auto", WebkitOverflowScrolling: "touch" }}>
                     <table className="data-table" style={{ marginTop: 4 }}>
                       <thead>
                         <tr>
@@ -550,7 +601,6 @@ export default function AdminPage() {
                           <th style={{ textAlign: "right" }}>Contributions</th>
                           <th style={{ textAlign: "right" }}>% of Total</th>
                           <th style={{ textAlign: "right" }}>Contributors</th>
-                          <th style={{ textAlign: "right" }}>Selected</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -567,11 +617,6 @@ export default function AdminPage() {
                               <td style={{ textAlign: "right" }}>
                                 <strong>{f.totalContributors ?? "—"}</strong>
                               </td>
-                              <td style={{ textAlign: "right" }}>
-                                {f.totalSelected > 0
-                                  ? <span className="badge b-green" style={{ fontSize: 11 }}>{f.totalSelected}</span>
-                                  : <span style={{ color: "var(--text-muted)" }}>—</span>}
-                              </td>
                             </tr>
                           );
                         })}
@@ -580,10 +625,10 @@ export default function AdminPage() {
                           <td style={{ textAlign: "right" }}>{totalContribAll}</td>
                           <td style={{ textAlign: "right" }}>100%</td>
                           <td style={{ textAlign: "right" }}>{totalContributors || "—"}</td>
-                          <td style={{ textAlign: "right" }}>{totalSelectedAll || "—"}</td>
                         </tr>
                       </tbody>
                     </table>
+                    </div>
                   </>
                 ) : (
                   <div className="cb" style={{ color: "var(--text-muted)", fontSize: 14, textAlign: "center", padding: "24px 0" }}>
@@ -592,72 +637,6 @@ export default function AdminPage() {
                 )}
               </div>
 
-              {/* Quick Summary + Browser Usage */}
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 18 }}>
-                <div className="card" style={{ marginBottom: 0 }}>
-                  <div className="ch">
-                    <div className="ch-title">Quick Summary</div>
-                    <div className="ch-sub">{yearLabel}</div>
-                  </div>
-                  <div className="cb">
-                    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-                      {[
-                        { label: "Total Contributions", value: totalContribAll,   color: "var(--navy)" },
-                        { label: "Total Contributors",  value: totalContributors, color: "var(--blue)" },
-                        { label: "Selected",            value: totalSelectedAll,  color: "var(--success)" },
-                        { label: "Total Users",         value: summary?.totalUsers ?? summary?.users,  color: "var(--navy)" },
-                        { label: "Guest Users",         value: guestCount,                            color: "var(--blue)" },
-                        { label: "Total Faculties",     value: totalFaculties,                        color: "var(--navy)" },
-                      ].filter((r) => r.value !== undefined && r.value !== null).map((row) => (
-                        <div key={row.label} style={{ display: "flex", justifyContent: "space-between", fontSize: 14, borderBottom: "1px solid var(--border)", paddingBottom: 8 }}>
-                          <span style={{ color: "var(--text-mid)" }}>{row.label}</span>
-                          <strong style={{ color: row.color }}>{row.value}</strong>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-
-                <div className="card" style={{ marginBottom: 0 }}>
-                  <div className="ch">
-                    <div className="ch-title">Browser Usage</div>
-                    <div className="ch-sub">{browserSessions.length} session{browserSessions.length !== 1 ? "s" : ""} tracked</div>
-                  </div>
-                  <div className="cb">
-                    {browserEntries.length > 0 ? (
-                      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                        {browserEntries.map(([browser, count]) => {
-                          const pct       = Math.round((count / browserTotal) * 100);
-                          const color     = browserColors[browser] || "#888";
-                          const isCurrent = browser === currentBrowser;
-                          return (
-                            <div key={browser}>
-                              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5, marginBottom: 4 }}>
-                                <span style={{ color: "var(--text-mid)", display: "flex", alignItems: "center", gap: 6 }}>
-                                  <span style={{ width: 10, height: 10, borderRadius: "50%", background: color, display: "inline-block" }} />
-                                  {browser}
-                                  {isCurrent && <span className="badge b-blue" style={{ fontSize: 10, padding: "1px 6px" }}>current</span>}
-                                </span>
-                                <span style={{ fontWeight: 600, color: "var(--navy)" }}>{count} · {pct}%</span>
-                              </div>
-                              <div style={{ height: 8, background: "var(--border)", borderRadius: 4, overflow: "hidden" }}>
-                                <div style={{ height: "100%", width: `${pct}%`, background: color, borderRadius: 4, transition: "width .4s" }} />
-                              </div>
-                            </div>
-                          );
-                        })}
-                        <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4, borderTop: "1px solid var(--border)", paddingTop: 8 }}>
-                          Tracked via browser sessions on this device.
-                        </div>
-                      </div>
-                    ) : (
-                      <div style={{ textAlign: "center", padding: "24px 0", color: "var(--text-muted)", fontSize: 13 }}>
-                        No sessions tracked yet.
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
             </>
           )}
 

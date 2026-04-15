@@ -4,7 +4,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import Topbar from "@/components/Topbar";
 import Sidebar from "@/components/Sidebar";
 import { getUser, getAccessToken } from "@/lib/api";
-import { submitContribution, updateContribution, getContribution } from "@/lib/services/contributions";
+import { submitContribution, updateContribution, getContribution, selectContribution } from "@/lib/services/contributions";
 import { listAcademicYears } from "@/lib/services/closures";
 
 function formatFileSize(bytes) {
@@ -13,7 +13,7 @@ function formatFileSize(bytes) {
   return (bytes / (1024 * 1024)).toFixed(1) + " MB";
 }
 
-const ACCEPTED_DOC_TYPES = [".doc", ".docx", ".pdf", ".odt"];
+const ACCEPTED_DOC_TYPES = [".doc", ".docx"];
 const ACCEPTED_IMG_TYPES = [".jpg", ".jpeg", ".png", ".gif", ".webp"];
 const MAX_IMAGES = 1;
 
@@ -40,6 +40,7 @@ function SubmitContributionInner() {
   const [loadingEdit, setLoadingEdit] = useState(isEdit);
   const [submitting, setSubmitting] = useState(false);
   const [success, setSuccess]       = useState(false);
+  const [showTCModal, setShowTCModal] = useState(false);
 
   const docInputRef = useRef(null);
   const imgInputRef = useRef(null);
@@ -94,7 +95,7 @@ function SubmitContributionInner() {
     if (!file) return;
     const ext = "." + file.name.split(".").pop().toLowerCase();
     if (!ACCEPTED_DOC_TYPES.includes(ext)) {
-      setDocError("Invalid file type. Please upload .doc, .docx, .pdf, or .odt");
+      setDocError("Invalid file type. Please upload .doc or .docx");
       return;
     }
     if (file.size > 10 * 1024 * 1024) {
@@ -147,7 +148,8 @@ function SubmitContributionInner() {
     setError("");
     if (!title.trim()) { setError("Please enter a contribution title."); return; }
     if (!isEdit && !academicYearId) { setError("Please select an academic year."); return; }
-    if (!isEdit && !docFile) { setError("Please upload a document file (.doc, .docx, .pdf, or .odt)."); return; }
+    if (!isEdit && !docFile) { setError("Please upload a document file (.doc or .docx)."); return; }
+    if (!isEdit && imgFiles.length === 0) { setError("Please upload a supporting image."); return; }
     if (!agreed) { setError("Please agree to the Terms & Conditions."); return; }
 
     setSubmitting(true);
@@ -170,6 +172,12 @@ function SubmitContributionInner() {
         );
       }
       if (res.success === false) throw new Error(res.message || (isEdit ? "Update failed." : "Submission failed."));
+
+      /* If editing, reset isSelected = false so the selected count stays accurate */
+      if (isEdit) {
+        selectContribution(editId, false).catch(() => {});
+      }
+
       imgFiles.forEach((f) => URL.revokeObjectURL(f.preview));
       setSuccess(true);
       setTimeout(() => router.push("/user/student"), 2500);
@@ -425,13 +433,13 @@ function SubmitContributionInner() {
                 <label>
                   Article Document {isEdit ? <span style={{ fontWeight: 400, color: "var(--text-muted)" }}>(Optional — replaces existing)</span> : "*"}
                   <span style={{ marginLeft: 8, fontSize: 12, fontWeight: 400, color: "var(--text-muted)" }}>
-                    .doc · .docx · .pdf · .odt — max 10 MB
+                    .doc · .docx — max 10 MB
                   </span>
                 </label>
                 <input
                   ref={docInputRef}
                   type="file"
-                  accept=".doc,.docx,.pdf,.odt"
+                  accept=".doc,.docx"
                   style={{ display: "none" }}
                   onChange={(e) => handleDocUpload(e.target.files[0])}
                 />
@@ -456,7 +464,7 @@ function SubmitContributionInner() {
                   >
                     <div className="uz-icon">📄</div>
                     <div className="uz-text">Drag &amp; drop or <strong>click to browse</strong></div>
-                    <div className="uz-hint">{isEdit ? "Upload a new file to replace the existing one" : "Accepted: .doc · .docx · .pdf · .odt · Max 10 MB"}</div>
+                    <div className="uz-hint">{isEdit ? "Upload a new file to replace the existing one" : "Accepted: .doc · .docx · Max 10 MB"}</div>
                   </div>
                 ) : (
                   <div className="uploaded-file-row">
@@ -481,9 +489,9 @@ function SubmitContributionInner() {
               {/* Image upload */}
               <div className="fgroup" style={{ marginBottom: 0 }}>
                 <label>
-                  Supporting Image
+                  Supporting Image *
                   <span style={{ marginLeft: 8, fontSize: 12, fontWeight: 400, color: "var(--text-muted)" }}>
-                    Optional · .jpg · .png · .gif · .webp — max 5 MB · 1 image
+                    .jpg · .png · .gif · .webp — max 5 MB · 1 image
                   </span>
                 </label>
                 <input
@@ -552,7 +560,10 @@ function SubmitContributionInner() {
                   disabled={submitting}
                 />
                 <label htmlFor="tc-submit">
-                  I have read and agree to the <a href="#">Terms &amp; Conditions</a>. This is my original work.
+                  I have read and agree to the{" "}
+                  <a href="#" onClick={(e) => { e.preventDefault(); setShowTCModal(true); }}>
+                    Terms &amp; Conditions
+                  </a>. This is my original work.
                 </label>
               </div>
             </div>
@@ -581,6 +592,27 @@ function SubmitContributionInner() {
 
         </main>
       </div>
+
+      {/* ── Terms & Conditions Modal ── */}
+      {showTCModal && (
+        <div
+          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}
+          onClick={() => setShowTCModal(false)}
+        >
+          <div
+            style={{ background: "#fff", borderRadius: 12, padding: 32, maxWidth: 480, width: "100%", boxShadow: "0 8px 32px rgba(0,0,0,0.18)" }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 style={{ marginTop: 0, marginBottom: 16, fontSize: 18, fontWeight: 700 }}>Terms &amp; Conditions</h3>
+            <p style={{ fontSize: 14, lineHeight: 1.7, color: "#444", margin: 0 }}>
+              By submitting to the UniVoice Magazine Portal, you confirm that your work is original and does not infringe any copyright. You grant the University a non-exclusive right to publish and distribute your contribution in the annual magazine. Submissions containing plagiarised or inappropriate content will be disqualified in accordance with University policy.
+            </p>
+            <div style={{ marginTop: 24, textAlign: "right" }}>
+              <button className="btn btn-primary" onClick={() => setShowTCModal(false)}>Close</button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }

@@ -34,7 +34,18 @@ const sidebarConfig = {
 /* ── helpers ── */
 function toLocalInput(dateStr) {
   if (!dateStr) return "";
-  return new Date(dateStr).toISOString().slice(0, 16);
+  const d   = new Date(dateStr);
+  const pad = (n) => String(n).padStart(2, "0");
+  return (
+    `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}` +
+    `T${pad(d.getHours())}:${pad(d.getMinutes())}`
+  );
+}
+
+// Convert datetime-local string (local time) to ISO string for API
+function toISO(localStr) {
+  if (!localStr) return undefined;
+  return new Date(localStr).toISOString();
 }
 
 function fmtDate(dateStr) {
@@ -144,8 +155,8 @@ export default function ClosureDatesPage() {
     try {
       const ed  = edits[cdId];
       const res = await updateClosureDate(cdId, {
-        initialClosureDate: ed.initialClosureDate || undefined,
-        finalClosureDate:   ed.finalClosureDate   || undefined,
+        initialClosureDate: toISO(ed.initialClosureDate),
+        finalClosureDate:   toISO(ed.finalClosureDate),
       });
       if (!res.success) throw new Error(res.message || "Update failed.");
       setSuccess("Closure dates saved successfully.");
@@ -171,8 +182,8 @@ export default function ClosureDatesPage() {
     setSaving(true); setError(""); setSuccess("");
     try {
       const res = await createAcademicYear({
-        startDate:            newYear.startDate,
-        endDate:              newYear.endDate,
+        startDate:            toISO(newYear.startDate),
+        endDate:              toISO(newYear.endDate),
         termsConditionsVerId: newYear.termsConditionsVerId,
       });
       if (!res.success) throw new Error(res.message || "Create failed.");
@@ -189,8 +200,8 @@ export default function ClosureDatesPage() {
     try {
       const res = await createClosureDate({
         academicYearId:     newClosure.academicYearId,
-        initialClosureDate: newClosure.initialClosureDate || undefined,
-        finalClosureDate:   newClosure.finalClosureDate   || undefined,
+        initialClosureDate: toISO(newClosure.initialClosureDate),
+        finalClosureDate:   toISO(newClosure.finalClosureDate),
         isActive:           newClosure.isActive,
       });
       if (!res.success) throw new Error(res.message || "Create failed.");

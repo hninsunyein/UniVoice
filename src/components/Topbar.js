@@ -31,7 +31,26 @@ export default function Topbar({ userInfo, backTo, backLabel, avatar }) {
   const [minsLeft,      setMinsLeft]      = useState(null);
   const [sessionExpired, setSessionExpired] = useState(false);
   const [lastLogin,     setLastLogin]     = useState(null);
+  const [sidebarOpen,   setSidebarOpen]   = useState(false);
   const intervalRef = useRef(null);
+
+  const toggleSidebar = () => {
+    setSidebarOpen(prev => {
+      const next = !prev;
+      document.body.classList.toggle("sidebar-open", next);
+      return next;
+    });
+  };
+
+  // Close sidebar on route change / resize
+  useEffect(() => {
+    const close = () => {
+      setSidebarOpen(false);
+      document.body.classList.remove("sidebar-open");
+    };
+    window.addEventListener("resize", close);
+    return () => window.removeEventListener("resize", close);
+  }, []);
 
   /* Read last login time once on mount (client only) */
   useEffect(() => {
@@ -83,7 +102,18 @@ export default function Topbar({ userInfo, backTo, backLabel, avatar }) {
   return (
     <>
       <div className="topbar">
-        <div className="logo">Uni<em>Voice</em></div>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <button
+            className="hamburger-btn"
+            onClick={toggleSidebar}
+            aria-label="Toggle menu"
+          >
+            <span className={`ham-line ${sidebarOpen ? "open" : ""}`} />
+            <span className={`ham-line ${sidebarOpen ? "open" : ""}`} />
+            <span className={`ham-line ${sidebarOpen ? "open" : ""}`} />
+          </button>
+          <div className="logo">Uni<em>Voice</em></div>
+        </div>
         <div className="topbar-info">
           {avatar ? (
             <div className="topbar-avatar-group">

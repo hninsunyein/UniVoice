@@ -3,10 +3,11 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Topbar from "@/components/Topbar";
 import Sidebar from "@/components/Sidebar";
-import { getUser, getAccessToken } from "@/lib/api";
+import { getUser, getAccessToken, BASE_URL } from "@/lib/api";
 import { listContributions } from "@/lib/services/contributions";
 import { listFaculties } from "@/lib/services/faculties";
 import { listAcademicYears } from "@/lib/services/closures";
+import mammoth from "mammoth";
 
 /* ── helpers ── */
 function fmtDate(dateStr) {
@@ -40,6 +41,11 @@ export default function GuestPage() {
   const [selectedFacultyId, setSelectedFacultyId] = useState("");
   const [activeYearId,      setActiveYearId]      = useState("");
   const [activeYearLabel,   setActiveYearLabel]   = useState("");
+
+  /* document view */
+  const [docBlob,     setDocBlob]     = useState(null);
+  const [docLoading,  setDocLoading]  = useState(false);
+  const [docViewing,  setDocViewing]  = useState(false);
 
   useEffect(() => {
     if (!getAccessToken()) { router.push("/login"); return; }
@@ -111,11 +117,9 @@ export default function GuestPage() {
           Array.isArray(raw?.result)        ? raw.result        :
           Array.isArray(raw)                ? raw               : [];
 
-        /* filter client-side: SELECTED status */
+        /* filter client-side: SELECTED status only (isSelected flag may be stale after student updates) */
         items = items.filter((c) =>
-          c.isSelected === true ||
-          c.contributionStatus === "SELECTED" ||
-          c.status === "SELECTED"
+          (c.status || c.contributionStatus || c.statusName || "").toUpperCase() === "SELECTED"
         );
         /* filter by faculty — path confirmed: c.student.user.facultyId */
         if (facultyId) {
@@ -133,6 +137,83 @@ export default function GuestPage() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const fetchDocBlob = async (id) => {
+    setDocBlob(null);
+    setDocLoading(true);
+    try {
+      let token = getAccessToken();
+      let res = await fetch(`${BASE_URL}/contributions/${id}/file`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.status === 401) {
+        try {
+          const r = await fetch(`${BASE_URL}/auth/refresh`, {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ refreshToken: localStorage.getItem("refreshToken") }),
+          });
+          const d = await r.json();
+          if (d?.data?.accessToken) {
+            token = d.data.accessToken;
+            localStorage.setItem("accessToken", token);
+            res = await fetch(`${BASE_URL}/contributions/${id}/file`, {
+              headers: { Authorization: `Bearer ${token}` },
+            });
+          }
+        } catch {}
+      }
+      if (res.ok) {
+        const blob = await res.blob();
+        if (blob.size > 0) setDocBlob(blob);
+      }
+    } catch {}
+    setDocLoading(false);
+  };
+
+  const openDocInTab = async () => {
+    if (!docBlob) return;
+    setDocViewing(true);
+    try {
+      const arrayBuffer = await docBlob.arrayBuffer();
+      const result = await mammoth.convertToHtml({ arrayBuffer });
+      const title = selected?.contributionTitle || selected?.title || "Document";
+      const html = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>${title}</title>
+  <style>
+    body { font-family: Calibri, Arial, sans-serif; max-width: 860px; margin: 0 auto; padding: 0 24px 40px; line-height: 1.7; color: #222; }
+    h1,h2,h3,h4 { margin-top: 1.2em; }
+    p { margin: .6em 0; }
+    img { max-width: 100%; }
+    .toolbar { position: sticky; top: 0; background: #f0f4fa; border-bottom: 1px solid #ccd6e8; padding: 10px 0; margin: 0 -24px 24px; display: flex; align-items: center; gap: 12px; padding-left: 24px; z-index: 10; }
+    .toolbar button { background: none; color: #1a4a8a; border: 1.5px solid #1a4a8a; border-radius: 6px; padding: 5px 14px; font-size: 13px; cursor: pointer; font-family: inherit; }
+    .toolbar .doc-name { font-size: 13px; font-weight: 600; color: #1a4a8a; flex: 1; }
+    .guest-note { font-size: 12px; color: #666; background: #fffbe6; border: 1px solid #f0c040; border-radius: 6px; padding: 6px 12px; }
+  </style>
+</head>
+<body>
+  <div class="toolbar">
+    <button onclick="window.close()">← Close Tab</button>
+    <span class="doc-name">📄 ${title}</span>
+    <span class="guest-note">👁 Read-only — Guest access</span>
+  </div>
+  ${result.value}
+</body>
+</html>`;
+      const htmlBlob = new Blob([html], { type: "text/html" });
+      window.open(URL.createObjectURL(htmlBlob), "_blank");
+    } catch {}
+    setDocViewing(false);
+  };
+
+  const openArticle = (c) => {
+    setSelected(c);
+    setDocBlob(null);
+    const id = c?.contributionId || c?.id || c?._id;
+    if (id) fetchDocBlob(id);
   };
 
   const avatarInfo = user
@@ -237,6 +318,38 @@ export default function GuestPage() {
                   </div>
                 )}
 
+                {/* View Document — no download allowed for guests */}
+                <div style={{ marginBottom: 20 }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: "var(--navy)", marginBottom: 10 }}>
+                    📎 Article Document
+                  </div>
+                  <div style={{ background: "var(--sky)", borderRadius: 8, padding: "12px 14px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <span style={{ fontSize: 20 }}>📄</span>
+                      <div>
+                        <div style={{ fontSize: 13, fontWeight: 600, color: "var(--navy)" }}>
+                          {selected?.originalFileName || selected?.fileName || "Article Document"}
+                        </div>
+                        <div style={{ fontSize: 11, color: "var(--text-muted)" }}>Word Document · Read-only</div>
+                      </div>
+                    </div>
+                    {docLoading ? (
+                      <span style={{ fontSize: 12, color: "var(--text-muted)" }}>Loading…</span>
+                    ) : docBlob ? (
+                      <button
+                        className="btn btn-outline btn-sm"
+                        onClick={openDocInTab}
+                        disabled={docViewing}
+                        style={{ display: "flex", alignItems: "center", gap: 6 }}
+                      >
+                        👁 {docViewing ? "Opening…" : "View Document"}
+                      </button>
+                    ) : (
+                      <span style={{ fontSize: 12, color: "var(--text-muted)" }}>Not available</span>
+                    )}
+                  </div>
+                </div>
+
                 <div className="alert info" style={{ marginBottom: 0 }}>
                   <span className="alert-icon">👁</span>
                   <div>
@@ -318,7 +431,7 @@ export default function GuestPage() {
           )}
 
           {/* Stats */}
-          <div className="stats" style={{ gridTemplateColumns: "repeat(3,1fr)", marginBottom: 24 }}>
+          <div className="stats-3">
             <div className="stat">
               <div className="stat-n">{loading ? "…" : contributions.length}</div>
               <div className="stat-l">Selected Articles</div>
@@ -367,7 +480,7 @@ export default function GuestPage() {
                       key={c.contributionId || c.id || i}
                       className="gallery-card"
                       style={{ cursor: "pointer" }}
-                      onClick={() => setSelected(c)}
+                      onClick={() => openArticle(c)}
                     >
                       <div
                         className="gallery-thumb"

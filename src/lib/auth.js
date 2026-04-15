@@ -33,8 +33,9 @@ const resolveRole = (roleName = "") => {
  * Returns { requiresPasswordChange, email } OR { path, user }
  */
 export const login = async (email, password, facultyId) => {
-  /* Build payload — omit password entirely for guest (no-password) flow */
-  const payload = { email };
+  /* Build payload — omit undefined/empty fields */
+  const payload = {};
+  if (email) payload.email = email;
   if (password !== undefined && password !== null && password !== "") {
     payload.password = password;
   }

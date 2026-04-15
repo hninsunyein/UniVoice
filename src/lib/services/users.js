@@ -12,6 +12,9 @@ export const getUser = (id) => get(`/users/${id}`);
 /** Create new user */
 export const createUser = (body) => post("/users", body);
 
+/** Create guest user (no password required) */
+export const createGuestUser = (body) => post("/users/guest", body);
+
 /** Update user account details */
 export const updateUser = (id, body) => patch(`/users/${id}/account`, body);
 
@@ -38,3 +41,6 @@ export const getMe = () => get("/users/me");
 
 /** Update current logged-in user's profile */
 export const updateMe = (body) => patch("/users/me", body);
+
+/** Get guest faculty login records (correct endpoint) */
+export const getGuestLogins = (params) => get("/users/guest-logins", params);

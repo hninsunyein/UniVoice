@@ -51,12 +51,12 @@ export default function MagazineFacultyPage() {
   const fetchContributions = async () => {
     setLoading(true);
     try {
-      const headers = {};
+      const headers = { "Content-Type": "application/json" };
       const token = getAccessToken();
       if (token) headers["Authorization"] = `Bearer ${token}`;
 
       const res = await fetch(`${BASE_URL}/contributions`, { headers });
-      if (!res.ok) { setLoading(false); return; }
+      if (!res.ok) { setContributions([]); setLoading(false); return; }
 
       const data = await res.json();
       const raw = data?.data ?? data;

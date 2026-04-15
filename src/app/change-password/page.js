@@ -3,6 +3,7 @@ import { useState, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { firstLoginChangePassword } from "@/lib/auth";
+import PasswordInput from "@/components/PasswordInput";
 
 function ChangePasswordForm() {
   const router = useRouter();
@@ -131,8 +132,7 @@ function ChangePasswordForm() {
 
         <div className="fgroup">
           <label>{isFirstLogin ? "Temporary Password" : "Current Password"}</label>
-          <input
-            type="password"
+          <PasswordInput
             value={form.currentPassword}
             onChange={handleChange("currentPassword")}
             placeholder="Enter your current / temporary password"
@@ -142,8 +142,7 @@ function ChangePasswordForm() {
 
         <div className="fgroup">
           <label>New Password</label>
-          <input
-            type="password"
+          <PasswordInput
             value={form.newPassword}
             onChange={handleChange("newPassword")}
             placeholder="Create a strong new password"
@@ -167,8 +166,7 @@ function ChangePasswordForm() {
 
         <div className="fgroup">
           <label>Confirm New Password</label>
-          <input
-            type="password"
+          <PasswordInput
             value={form.confirmPassword}
             onChange={handleChange("confirmPassword")}
             placeholder="Re-enter your new password"

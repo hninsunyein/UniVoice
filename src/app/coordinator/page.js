@@ -127,7 +127,7 @@ export default function CoordinatorPage() {
                     <label>Your Comment *</label>
                     <textarea style={{ minHeight: 80 }} placeholder="Write editorial feedback…"></textarea>
                   </div>
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                  <div className="action-grid">
                     <button className="btn btn-success">✓ Select for Magazine</button>
                     <button className="btn btn-danger">✕ Reject</button>
                   </div>

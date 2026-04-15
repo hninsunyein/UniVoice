@@ -2,10 +2,12 @@
 import { useState, useEffect, useCallback } from "react";
 import Topbar from "@/components/Topbar";
 import Sidebar from "@/components/Sidebar";
+import PasswordInput from "@/components/PasswordInput";
 import {
   listUsers, createUser, updateUser,
   setUserStatus, setUserPassword,
   deleteUser, unlockUser, getUser as fetchUserById,
+  getGuestLogins,
 } from "@/lib/services/users";
 import { listFaculties } from "@/lib/services/faculties";
 import { listTerms } from "@/lib/services/terms";
@@ -16,8 +18,8 @@ const ROLES = [
   { label: "Student",           value: "STUDENT" },
   { label: "Coordinator",       value: "MARKETING_COORDINATOR" },
   { label: "Marketing Manager", value: "MARKETING_MANAGER" },
-  { label: "Admin",             value: "ADMIN" },
   { label: "Guest",             value: "GUEST" },
+  { label: "Admin",             value: "ADMIN" },
 ];
 
 const sidebarConfig = {
@@ -54,6 +56,14 @@ export default function UsersPage() {
   const [totalPages, setTotalPages] = useState(1);
   const [totalCount, setTotalCount] = useState(0);
 
+  /* ── tabs ── */
+  const [activeTab,  setActiveTab]  = useState("users");
+
+  /* ── guest accounts ── */
+  const [guestUsers,   setGuestUsers]   = useState([]);
+  const [guestLoading, setGuestLoading] = useState(false);
+  const [guestSearch,  setGuestSearch]  = useState("");
+
   /* ── search / filter ── */
   const [search,     setSearch]     = useState("");
   const [roleFilter, setRoleFilter] = useState("");
@@ -66,12 +76,13 @@ export default function UsersPage() {
   const [saving,      setSaving]      = useState(false);
 
   /* ── modals ── */
-  const [showCreateModal, setShowCreateModal] = useState(false);
-  const [showEditModal,   setShowEditModal]   = useState(false);
-  const [showResetAlert,  setShowResetAlert]  = useState(false);
-  const [showDeleteAlert, setShowDeleteAlert] = useState(false);
-  const [showUnlockAlert, setShowUnlockAlert] = useState(false);
-  const [editUser,        setEditUser]        = useState(null);
+  const [showCreateModal,   setShowCreateModal]   = useState(false);
+  const [showEditModal,     setShowEditModal]     = useState(false);
+  const [showResetAlert,    setShowResetAlert]    = useState(false);
+  const [showResetSuccess,  setShowResetSuccess]  = useState(false);
+  const [showDeleteAlert,   setShowDeleteAlert]   = useState(false);
+  const [showUnlockAlert,   setShowUnlockAlert]   = useState(false);
+  const [editUser,          setEditUser]          = useState(null);
 
   /* ── forms ── */
   const [createForm,  setCreateForm]  = useState(EMPTY_FORM);
@@ -100,6 +111,11 @@ export default function UsersPage() {
       if (role) params.role   = role;
       if (q)    params.search = q;
       const res = await listUsers(params);
+      if (res.status === 403) {
+        setLoading(false);
+        router.replace("/admin/login");
+        return;
+      }
       if (res.success) {
         const raw = res.data;
         const list =
@@ -125,6 +141,44 @@ export default function UsersPage() {
 
   useEffect(() => { fetchUsers(page, roleFilter, search); }, [page, roleFilter]);
 
+  /* ─────────── fetch guests ─────────────────────────────────────
+   * Uses GET /api/users/guest-logins
+   * Response: { data: { items: [...], total, page, totalPages } }
+   * Each item: { guestFacultyLoginId, email, createdAt, faculty, user }
+   * ──────────────────────────────────────────────────────────── */
+  const fetchGuests = useCallback(async (q = guestSearch) => {
+    setGuestLoading(true);
+    try {
+      const params = { page: 1, pageSize: 100 };
+      if (q) params.search = q;
+      const res = await getGuestLogins(params);
+      if (res?.success) {
+        const items = res.data?.items ?? res.data?.data ?? [];
+        const normalised = items.map(r => ({
+          id:        r.guestFacultyLoginId || r.user?.userId,
+          userId:    r.user?.userId,
+          username:  r.user?.username,
+          email:     r.email || r.user?.email,
+          isActive:  r.user?.isActive ?? true,
+          createdAt: r.createdAt,
+          faculty:   r.faculty || null,
+          facultyId: r.faculty?.facultyId || null,
+          _raw:      r,
+        }));
+        setGuestUsers(normalised);
+      } else {
+        setGuestUsers([]);
+      }
+    } catch {
+      setGuestUsers([]);
+    } finally {
+      setGuestLoading(false);
+    }
+  }, [guestSearch]);
+
+  useEffect(() => { fetchGuests(); }, []);  // load badge count on mount
+  useEffect(() => { if (activeTab === "guests") fetchGuests(); }, [activeTab]);
+
   /* ─────────── search / filter ─────────── */
   const handleSearch    = () => { setPage(1); fetchUsers(1, roleFilter, search); };
   const handleRoleFilter = (v) => { setRoleFilter(v); setPage(1); };
@@ -132,13 +186,29 @@ export default function UsersPage() {
   /* ─────────── helpers ─────────── */
   const uid = (u) => u?.id ?? u?.userId ?? u?.user_id ?? u?.accountId ?? u?._id ?? u?.uid;
 
-  const buildForm = (u) => ({
-    username:  u.username  || "",
-    email:     u.email     || "",
-    roleName:  u.roleName  || "STUDENT",
-    facultyId: u.facultyId || u.faculty?.facultyId || "",
-    isActive:  u.isActive  ?? true,
-  });
+  const buildForm = (u) => {
+    const roleName = (
+      u.roleName ||
+      u.role?.roleName ||
+      u.role?.name ||
+      u.role ||
+      "STUDENT"
+    ).toUpperCase();
+
+    const facultyId =
+      u.facultyId ||
+      u.faculty?.facultyId ||
+      u.facultyDetails?.facultyId ||
+      "";
+
+    return {
+      username:  u.username || u.name || "",
+      email:     u.email    || "",
+      roleName,
+      facultyId,
+      isActive:  u.isActive ?? true,
+    };
+  };
 
   /* ─────────── edit open ─────────── */
   const openEdit = async (user) => {
@@ -166,32 +236,52 @@ export default function UsersPage() {
   const notify = (msg) => { setSuccess(msg); setTimeout(() => setSuccess(""), 4000); };
 
   /* ─────────── CREATE ─────────── */
+  const FACULTY_REQUIRED_ROLES = ["STUDENT", "MARKETING_COORDINATOR", "GUEST"];
+
   const handleCreate = async () => {
     setFormError("");
-    const isGuestRole = createForm.roleName === "GUEST";
-    if (!createForm.username || !createForm.email) {
-      setFormError("Name and email are required.");
+    const isGuest = createForm.roleName === "GUEST";
+
+    // Validation
+    if (!createForm.username.trim()) { setFormError("Full name is required."); return; }
+    if (!createForm.email.trim())    { setFormError("Email is required."); return; }
+    if (!createForm.roleName)        { setFormError("User role is required."); return; }
+    if (!createForm.password)        { setFormError("Initial password is required."); return; }
+    if (FACULTY_REQUIRED_ROLES.includes(createForm.roleName) && !createForm.facultyId) {
+      setFormError("Faculty is required for this role.");
       return;
     }
-    if (!isGuestRole && !createForm.password) {
-      setFormError("Password is required for non-guest accounts.");
-      return;
-    }
+
     setSaving(true);
     try {
-      const payload = { ...createForm };
-      if (!payload.facultyId) delete payload.facultyId;
-      if (isGuestRole) delete payload.password;
-      if (createForm.roleName === "STUDENT" && terms.length > 0) {
-        payload.termsConditionsVerId = terms[0].termsConditionsVerId;
+      let res;
+      {
+        const payload = {
+          username: createForm.username.trim(),
+          email:    createForm.email.trim(),
+          roleName: createForm.roleName,
+          password: createForm.password,
+        };
+        if (createForm.facultyId) payload.facultyId = createForm.facultyId;
+        if (createForm.roleName === "STUDENT" && terms.length > 0) {
+          payload.termsConditionsVerId = terms[0].termsConditionsVerId;
+        }
+        res = await createUser(payload);
       }
-      const res = await createUser(payload);
+
       if (!res.success) throw new Error(res.message || "Create failed.");
       setShowCreateModal(false);
       setCreateForm(EMPTY_FORM);
-      notify("User created successfully.");
-      fetchUsers(1, roleFilter, search);
-      setPage(1);
+
+      if (createForm.roleName === "GUEST") {
+        notify("Guest account created successfully.");
+        setActiveTab("guests");
+        fetchGuests();
+      } else {
+        notify("User created successfully.");
+        fetchUsers(1, roleFilter, search);
+        setPage(1);
+      }
     } catch (err) {
       setFormError(err.message);
     } finally {
@@ -248,7 +338,7 @@ export default function UsersPage() {
       setShowResetAlert(false);
       setNewPassword("");
       setConfirmPassword("");
-      notify("Password updated successfully.");
+      setShowResetSuccess(true);
     } catch (err) {
       setResetError(err.message);
     } finally {
@@ -277,13 +367,18 @@ export default function UsersPage() {
   /* ─────────── DELETE ─────────── */
   const handleDelete = async () => {
     setSaving(true);
+    const isGuestUser = (
+      (editUser?.roleName || editUser?.role?.roleName || editUser?.role?.name || editUser?.role || "")
+        .toUpperCase() === "GUEST"
+    );
     try {
       const res = await deleteUser(uid(editUser));
       if (!res.success) throw new Error(res.message || "Delete failed.");
       setShowDeleteAlert(false);
       setShowEditModal(false);
       notify("User deleted.");
-      fetchUsers(page, roleFilter, search);
+      if (isGuestUser) { fetchGuests(); }
+      else { fetchUsers(page, roleFilter, search); }
     } catch (err) {
       setApiError(err.message);
       setShowDeleteAlert(false);
@@ -332,6 +427,133 @@ export default function UsersPage() {
             </div>
           )}
 
+          {/* Tabs */}
+          <div style={{ display: "flex", borderBottom: "2px solid var(--border)", marginBottom: 20 }}>
+            {[
+              { key: "users",  label: "All Users" },
+              { key: "guests", label: "👤 Guest Accounts", badge: guestUsers.length },
+            ].map(tab => (
+              <button
+                key={tab.key}
+                onClick={() => setActiveTab(tab.key)}
+                style={{
+                  padding: "10px 20px", border: "none", background: "none", cursor: "pointer",
+                  fontSize: 13.5, fontWeight: activeTab === tab.key ? 700 : 500,
+                  color: activeTab === tab.key ? "var(--blue)" : "var(--text-muted)",
+                  borderBottom: activeTab === tab.key ? "2px solid var(--blue)" : "2px solid transparent",
+                  marginBottom: -2, display: "flex", alignItems: "center", gap: 6,
+                }}
+              >
+                {tab.label}
+                {tab.badge > 0 && (
+                  <span style={{ background: "var(--blue)", color: "#fff", fontSize: 11, fontWeight: 700, padding: "1px 7px", borderRadius: 20 }}>
+                    {tab.badge}
+                  </span>
+                )}
+              </button>
+            ))}
+          </div>
+
+          {/* ── GUEST ACCOUNTS TABLE ── */}
+          {activeTab === "guests" && (
+            <>
+              <div className="adm-table-header" style={{ marginBottom: 12 }}>
+                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                  <div className="adm-search-box">
+                    <span>🔍</span>
+                    <input
+                      type="text"
+                      placeholder="Search by name or email…"
+                      value={guestSearch}
+                      onChange={e => setGuestSearch(e.target.value)}
+                    />
+                  </div>
+                  {guestSearch && (
+                    <button className="btn btn-outline btn-sm" style={{ color: "var(--text-muted)" }} onClick={() => setGuestSearch("")}>Clear</button>
+                  )}
+                </div>
+                <button className="btn btn-outline" onClick={fetchGuests} disabled={guestLoading}>↻ Refresh</button>
+              </div>
+
+              <div className="adm-table-wrap">
+                <table className="adm-table">
+                  <thead>
+                    <tr>
+                      <th>#</th>
+                      <th>Name</th>
+                      <th>Email</th>
+                      <th>Faculty</th>
+                      <th>Status</th>
+                      <th>Created</th>
+                      <th style={{ width: 80, textAlign: "center" }}>Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {guestLoading ? (
+                      <tr><td colSpan={7} style={{ textAlign: "center", padding: "40px", color: "var(--text-muted)" }}>Loading guest accounts…</td></tr>
+                    ) : (() => {
+                      const q = guestSearch.toLowerCase();
+                      const filtered = guestUsers.filter(g => {
+                        if (!q) return true;
+                        const name  = (g.username || g.name || "").toLowerCase();
+                        const email = (g.email || "").toLowerCase();
+                        return name.includes(q) || email.includes(q);
+                      });
+                      return filtered.length === 0 ? (
+                        <tr><td colSpan={7} style={{ textAlign: "center", padding: "40px", color: "var(--text-muted)" }}>
+                          {guestSearch ? "No guest accounts match your search." : "No guest accounts yet."}
+                        </td></tr>
+                      ) : filtered.map((g, i) => {
+                        // Resolve faculty name: prefer joined object, fall back to
+                        // looking up facultyId in the already-loaded faculties list
+                        const facultyName =
+                          g.faculty?.facultyName ||
+                          g.facultyName ||
+                          faculties.find(f => f.facultyId === g.facultyId)?.facultyName ||
+                          "—";
+                        return (
+                        <tr key={g.id || g.userId || g.accountId || i}>
+                          <td style={{ color: "var(--text-muted)", fontSize: 12 }}>{i + 1}</td>
+                          <td>
+                            <div style={{ fontWeight: 600, color: "var(--navy)", fontSize: 13.5 }}>
+                              {g.username || g.name || "—"}
+                            </div>
+                          </td>
+                          <td style={{ color: "var(--text-mid)", fontSize: 13 }}>{g.email || "—"}</td>
+                          <td style={{ fontSize: 13, color: "var(--text-mid)" }}>
+                            {facultyName}
+                          </td>
+                          <td>
+                            <span className={g.isActive !== false ? "adm-status-active" : "adm-status-inactive"}>
+                              {g.isActive !== false ? "Active" : "Inactive"}
+                            </span>
+                          </td>
+                          <td style={{ fontSize: 12, color: "var(--text-muted)" }}>
+                            {g.createdAt
+                              ? new Date(g.createdAt).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })
+                              : "—"}
+                          </td>
+                          <td style={{ textAlign: "center" }}>
+                            <button
+                              className="adm-btn-icon"
+                              title="Delete"
+                              style={{ color: "var(--danger, #b52a2a)" }}
+                              onClick={() => { setEditUser(g); setShowDeleteAlert(true); }}
+                            >🗑</button>
+                          </td>
+                        </tr>
+                        );
+                      });
+                    })()}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
+
+          {/* ── ALL USERS TABLE ── */}
+          {activeTab === "users" && (
+            <>
           {/* Search + Filter bar */}
           <div className="adm-table-header" style={{ marginBottom: 12 }}>
             <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
@@ -352,7 +574,7 @@ export default function UsersPage() {
                 style={{ border: "1.5px solid var(--border)", borderRadius: 7, padding: "8px 12px", fontFamily: "inherit", fontSize: 13, color: "var(--text)" }}
               >
                 <option value="">All Roles</option>
-                {ROLES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
+                {ROLES.filter(r => r.value !== "GUEST").map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
               </select>
               {(search || roleFilter) && (
                 <button
@@ -381,6 +603,7 @@ export default function UsersPage() {
                 <tr>
                   <th>Name</th>
                   <th>Email</th>
+                  <th>Role</th>
                   <th>Faculty</th>
                   <th>Status</th>
                   <th style={{ width: 80, textAlign: "center" }}>Actions</th>
@@ -389,33 +612,53 @@ export default function UsersPage() {
               <tbody>
                 {loading ? (
                   <tr>
-                    <td colSpan={5} style={{ textAlign: "center", padding: "40px", color: "var(--text-muted)" }}>
+                    <td colSpan={6} style={{ textAlign: "center", padding: "40px", color: "var(--text-muted)" }}>
                       Loading users…
                     </td>
                   </tr>
-                ) : users.length === 0 ? (
-                  <tr>
-                    <td colSpan={5} style={{ textAlign: "center", padding: "40px", color: "var(--text-muted)" }}>
-                      {search || roleFilter ? "No users match your search." : "No users found."}
-                    </td>
-                  </tr>
-                ) : users.map((u, i) => (
+                ) : (() => {
+                  const nonGuests = users.filter(u => {
+                    const r = (u.roleName || u.role?.roleName || u.role?.name || u.role || "").toUpperCase();
+                    return r !== "GUEST";
+                  });
+                  if (nonGuests.length === 0) return (
+                    <tr>
+                      <td colSpan={6} style={{ textAlign: "center", padding: "40px", color: "var(--text-muted)" }}>
+                        {search || roleFilter ? "No users match your search." : "No users found."}
+                      </td>
+                    </tr>
+                  );
+                  return nonGuests.map((u, i) => (
                   <tr key={uid(u) || i}>
                     <td>
-                      <div style={{ fontSize: 13.5, fontWeight: 600, color: "var(--navy)", marginBottom: 3 }}>
+                      <div style={{ fontSize: 13.5, fontWeight: 600, color: "var(--navy)" }}>
                         {u.username}
                       </div>
-                      {u.roleName && (
-                        <span style={{
-                          fontSize: 11, fontWeight: 600, padding: "2px 8px", borderRadius: 10,
-                          background: u.roleName === "ADMIN" ? "#eef2ff" : u.roleName === "STUDENT" ? "#e6f7ef" : u.roleName === "MARKETING_COORDINATOR" ? "#fff7e6" : "#f0f4ff",
-                          color: u.roleName === "ADMIN" ? "#3730a3" : u.roleName === "STUDENT" ? "#0e7a55" : u.roleName === "MARKETING_COORDINATOR" ? "#b45309" : "#1a3a6a",
-                        }}>
-                          {ROLES.find(r => r.value === u.roleName)?.label || u.roleName}
-                        </span>
-                      )}
                     </td>
                     <td style={{ color: "var(--text-mid)", fontSize: 13 }}>{u.email || "—"}</td>
+                    <td>
+                      {(() => {
+                        const role = u.roleName || u.role?.roleName || u.role?.name || u.role || "";
+                        const label = ROLES.find(r => r.value === role)?.label || role;
+                        const bg =
+                          role === "ADMIN"                 ? "#eef2ff" :
+                          role === "STUDENT"               ? "#e6f7ef" :
+                          role === "MARKETING_COORDINATOR" ? "#fff7e6" :
+                          role === "MARKETING_MANAGER"     ? "#f0f4ff" :
+                          role === "GUEST"                 ? "#fdf4e7" : "#f4f4f4";
+                        const color =
+                          role === "ADMIN"                 ? "#3730a3" :
+                          role === "STUDENT"               ? "#0e7a55" :
+                          role === "MARKETING_COORDINATOR" ? "#b45309" :
+                          role === "MARKETING_MANAGER"     ? "#1a3a6a" :
+                          role === "GUEST"                 ? "#92400e" : "#555";
+                        return label ? (
+                          <span style={{ fontSize: 12, fontWeight: 600, padding: "3px 10px", borderRadius: 10, background: bg, color }}>
+                            {label}
+                          </span>
+                        ) : "—";
+                      })()}
+                    </td>
                     <td style={{ fontSize: 13, color: "var(--text-mid)" }}>{u.faculty?.facultyName || u.facultyName || "—"}</td>
                     <td>
                       <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
@@ -439,13 +682,19 @@ export default function UsersPage() {
                       </div>
                     </td>
                   </tr>
-                ))}
+                  ));
+                })()}
               </tbody>
             </table>
 
             <div className="adm-table-footer">
               <div style={{ fontSize: 13, color: "var(--text-muted)" }}>
-                {totalCount > 0 ? `Showing ${users.length} of ${totalCount} users` : `${users.length} user${users.length !== 1 ? "s" : ""}`}
+                {(() => {
+                const nonGuestCount = users.filter(u => (u.roleName || u.role?.roleName || u.role?.name || u.role || "").toUpperCase() !== "GUEST").length;
+                return totalCount > 0
+                  ? `Showing ${nonGuestCount} of ${totalCount} users`
+                  : `${nonGuestCount} user${nonGuestCount !== 1 ? "s" : ""}`;
+              })()}
               </div>
               {totalPages > 1 && (
                 <div className="adm-pagination">
@@ -462,6 +711,8 @@ export default function UsersPage() {
               )}
             </div>
           </div>
+          </>
+          )}
 
         </main>
       </div>
@@ -492,29 +743,40 @@ export default function UsersPage() {
               </div>
               <div className="adm-field">
                 <label>User Role *</label>
-                <select value={createForm.roleName} onChange={e => setCreateForm(p => ({ ...p, roleName: e.target.value }))}>
-                  {ROLES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
+                <select value={createForm.roleName} onChange={e => {
+                  const role = e.target.value;
+                  setCreateForm(p => ({
+                    ...p,
+                    roleName: role,
+                    facultyId: role === "MARKETING_MANAGER" ? "" : p.facultyId,
+                  }));
+                }}>
+                  {ROLES.filter(r => r.value !== "ADMIN").map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
                 </select>
               </div>
-              {createForm.roleName !== "GUEST" && (
+              <div className="adm-field">
+                <label>Initial Password *</label>
+                <PasswordInput
+                  compact
+                  placeholder="Temporary password"
+                  value={createForm.password}
+                  onChange={e => setCreateForm(p => ({ ...p, password: e.target.value }))}
+                />
+              </div>
+              {FACULTY_REQUIRED_ROLES.includes(createForm.roleName) && (
                 <div className="adm-field">
-                  <label>Initial Password *</label>
-                  <input type="password" placeholder="Temporary password" value={createForm.password}
-                    onChange={e => setCreateForm(p => ({ ...p, password: e.target.value }))} />
+                  <label>Faculty *</label>
+                  <select value={createForm.facultyId} onChange={e => setCreateForm(p => ({ ...p, facultyId: e.target.value }))}>
+                    <option value="">— Select faculty —</option>
+                    {faculties.map(f => <option key={f.facultyId} value={f.facultyId}>{f.facultyName}</option>)}
+                  </select>
                 </div>
               )}
-              <div className="adm-field">
-                <label>Faculty</label>
-                <select value={createForm.facultyId} onChange={e => setCreateForm(p => ({ ...p, facultyId: e.target.value }))}>
-                  <option value="">— Select faculty —</option>
-                  {faculties.map(f => <option key={f.facultyId} value={f.facultyId}>{f.facultyName}</option>)}
-                </select>
-              </div>
             </div>
             <div className="adm-modal-footer">
               <button className="btn btn-outline" onClick={() => setShowCreateModal(false)} disabled={saving}>Cancel</button>
               <button className="btn btn-navy" onClick={handleCreate} disabled={saving}>
-                {saving ? "Creating…" : "Create User"}
+                {saving ? "Creating…" : createForm.roleName === "GUEST" ? "Create Guest Account" : "Create User"}
               </button>
             </div>
           </div>
@@ -557,19 +819,28 @@ export default function UsersPage() {
                   <input type="email" value={editForm.email || ""}
                     onChange={e => setEditForm(p => ({ ...p, email: e.target.value }))} />
                 </div>
-                <div className="adm-field">
+                <div className={`adm-field${editForm.roleName === "MARKETING_MANAGER" ? "" : ""}`} style={{ gridColumn: editForm.roleName === "MARKETING_MANAGER" ? "1 / -1" : "" }}>
                   <label>Role</label>
-                  <select value={editForm.roleName || ""} onChange={e => setEditForm(p => ({ ...p, roleName: e.target.value }))}>
+                  <select value={editForm.roleName || ""} onChange={e => {
+                    const role = e.target.value;
+                    setEditForm(p => ({
+                      ...p,
+                      roleName: role,
+                      facultyId: role === "MARKETING_MANAGER" ? "" : p.facultyId,
+                    }));
+                  }}>
                     {ROLES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
                   </select>
                 </div>
-                <div className="adm-field">
-                  <label>Faculty</label>
-                  <select value={editForm.facultyId || ""} onChange={e => setEditForm(p => ({ ...p, facultyId: e.target.value }))}>
-                    <option value="">— None —</option>
-                    {faculties.map(f => <option key={f.facultyId} value={f.facultyId}>{f.facultyName}</option>)}
-                  </select>
-                </div>
+                {editForm.roleName !== "MARKETING_MANAGER" && (
+                  <div className="adm-field">
+                    <label>Faculty</label>
+                    <select value={editForm.facultyId || ""} onChange={e => setEditForm(p => ({ ...p, facultyId: e.target.value }))}>
+                      <option value="">— None —</option>
+                      {faculties.map(f => <option key={f.facultyId} value={f.facultyId}>{f.facultyName}</option>)}
+                    </select>
+                  </div>
+                )}
               </div>
 
               <div className="adm-field">
@@ -619,8 +890,8 @@ export default function UsersPage() {
             )}
             <div className="adm-field">
               <label>New Password</label>
-              <input
-                type="password"
+              <PasswordInput
+                compact
                 placeholder="Enter new password"
                 value={newPassword}
                 onChange={e => setNewPassword(e.target.value)}
@@ -629,8 +900,8 @@ export default function UsersPage() {
             </div>
             <div className="adm-field">
               <label>Confirm Password</label>
-              <input
-                type="password"
+              <PasswordInput
+                compact
                 placeholder="Re-enter new password"
                 value={confirmPassword}
                 onChange={e => setConfirmPassword(e.target.value)}
@@ -642,6 +913,31 @@ export default function UsersPage() {
               <button className="btn btn-navy" onClick={handleResetPassword} disabled={saving}>
                 {saving ? "Saving…" : "Set Password"}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ══════════════ RESET PASSWORD SUCCESS ══════════════ */}
+      {showResetSuccess && (
+        <div className="adm-modal-overlay" onClick={() => setShowResetSuccess(false)}>
+          <div className="adm-alert-dialog" style={{ width: 360, textAlign: "center" }} onClick={e => e.stopPropagation()}>
+            <div style={{
+              width: 64, height: 64, borderRadius: "50%",
+              background: "linear-gradient(135deg, #e6f7ef, #c8f0d8)",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              margin: "0 auto 16px",
+            }}>
+              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#0e7a55" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="20 6 9 17 4 12" />
+              </svg>
+            </div>
+            <div style={{ fontSize: 17, fontWeight: 700, color: "var(--navy)", marginBottom: 8 }}>
+              Password Reset Successfully
+            </div>
+            <div style={{ fontSize: 13.5, color: "var(--text-muted)", marginBottom: 8, lineHeight: 1.5 }}>
+              The password for <strong style={{ color: "var(--text)" }}>{editUser?.username || editUser?.email}</strong> has been updated.
+              They can now log in with the new password.
             </div>
           </div>
         </div>

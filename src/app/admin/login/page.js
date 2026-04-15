@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { login } from "@/lib/auth";
 import { clearTokens } from "@/lib/api";
+import PasswordInput from "@/components/PasswordInput";
 
 const ADMIN_ROLES = ["ADMIN", "SUPER_ADMIN", "admin", "super_admin"];
 
@@ -98,8 +99,7 @@ export default function AdminLoginPage() {
 
         <div className="fgroup">
           <label>Password</label>
-          <input
-            type="password"
+          <PasswordInput
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             placeholder="Enter your password"

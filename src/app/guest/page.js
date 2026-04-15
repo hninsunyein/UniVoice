@@ -53,7 +53,7 @@ export default function GuestPage() {
             <div>You are viewing as a <strong>Guest</strong>. You can browse selected contributions for the Faculty of Engineering only. You cannot edit or download files.</div>
           </div>
 
-          <div className="stats" style={{ gridTemplateColumns: "repeat(3,1fr)" }}>
+          <div className="stats-3">
             <div className="stat"><div className="stat-n">24</div><div className="stat-l">Selected Articles</div></div>
             <div className="stat green"><div className="stat-n">47</div><div className="stat-l">Total Images</div></div>
             <div className="stat"><div className="stat-n">5</div><div className="stat-l">Faculties</div></div>

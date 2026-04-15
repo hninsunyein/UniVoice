@@ -3,6 +3,7 @@ import { useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { requestPasswordReset, confirmPasswordReset } from "@/lib/auth";
+import PasswordInput from "@/components/PasswordInput";
 
 export default function ForgotPasswordPage() {
   const router = useRouter();
@@ -225,8 +226,7 @@ export default function ForgotPasswordPage() {
             {/* New password */}
             <div className="fgroup">
               <label>New Password</label>
-              <input
-                type="password"
+              <PasswordInput
                 value={newPassword}
                 onChange={(e) => setNewPassword(e.target.value)}
                 placeholder="Create a strong new password"
@@ -248,8 +248,7 @@ export default function ForgotPasswordPage() {
             {/* Confirm password */}
             <div className="fgroup">
               <label>Confirm New Password</label>
-              <input
-                type="password"
+              <PasswordInput
                 value={confirmPassword}
                 onChange={(e) => setConfirmPassword(e.target.value)}
                 placeholder="Re-enter your new password"

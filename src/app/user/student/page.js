@@ -4,7 +4,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import Topbar from "@/components/Topbar";
 import Sidebar from "@/components/Sidebar";
-import { getUser, getAccessToken } from "@/lib/api";
+import { getUser, getAccessToken, BASE_URL } from "@/lib/api";
 import { listContributions, getContribution } from "@/lib/services/contributions";
 import { getComments } from "@/lib/services/comments";
 import { listAcademicYears } from "@/lib/services/closures";
@@ -34,21 +34,17 @@ function fmtCommentDate(d) {
 }
 
 const st = (s) => s?.toUpperCase();
+/* Read status from whichever field the API uses */
+const getStatus = (c) =>
+  (c?.status || c?.contributionStatus || c?.statusName || "").toUpperCase();
 
-function StatusBadge({ status, createdAt }) {
-  const s = st(status);
+function StatusBadge({ c, status }) {
+  const s = c ? getStatus(c) : st(status);
   if (s === "SELECTED")                    return <span className="badge b-green">✅ Selected</span>;
-  if (s === "REJECTED")                    return <span className="badge b-red">✕ Rejected</span>;
   if (s === "REVIEWED")                    return <span className="badge b-purple">🔍 Under Review</span>;
   if (s === "UPDATE" || s === "UPDATED")   return <span className="badge b-warn">✏️ Updated</span>;
-  if (s === "PENDING" || s === "SUBMITTED") {
-    const subDate = createdAt ? parseDate(createdAt) : null;
-    const overdue = subDate ? Date.now() > subDate.getTime() + 14 * 24 * 60 * 60 * 1000 : false;
-    return overdue
-      ? <span className="badge b-red">⚠ Overdue</span>
-      : <span className="badge b-blue">⏳ Submitted</span>;
-  }
-  return <span className="badge b-draft">{status || "—"}</span>;
+  if (s === "PENDING" || s === "SUBMITTED") return <span className="badge b-blue">⏳ Submitted</span>;
+  return <span className="badge b-draft">{s || "—"}</span>;
 }
 
 const cid = (c) => c?.contributionId || c?.id || c?._id;
@@ -69,6 +65,10 @@ function StudentDashboard() {
   const [detailLoading, setDetailLoading] = useState(false);
   const [error,         setError]         = useState("");
   const [loginAt,       setLoginAt]       = useState(null);
+
+  const [docBlob,      setDocBlob]      = useState(null);
+  const [imgBlob,      setImgBlob]      = useState(null);
+  const [filesLoading, setFilesLoading] = useState(false);
 
   useEffect(() => {
     if (!getAccessToken()) { router.push("/login"); return; }
@@ -117,6 +117,46 @@ function StudentDashboard() {
     }
   };
 
+  const fetchBlobForStudent = async (endpoint) => {
+    try {
+      let token = getAccessToken();
+      let res = await fetch(`${BASE_URL}${endpoint}`, { headers: { Authorization: `Bearer ${token}` } });
+      if (res.status === 401) {
+        try {
+          const r = await fetch(`${BASE_URL}/auth/refresh`, {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ refreshToken: localStorage.getItem("refreshToken") }),
+          });
+          const d = await r.json();
+          if (d?.data?.accessToken) {
+            token = d.data.accessToken;
+            localStorage.setItem("accessToken", token);
+            res = await fetch(`${BASE_URL}${endpoint}`, { headers: { Authorization: `Bearer ${token}` } });
+          }
+        } catch {}
+      }
+      if (!res.ok) return null;
+      const blob = await res.blob();
+      if (blob.size === 0) return null;
+      return { blobUrl: URL.createObjectURL(blob), blob };
+    } catch { return null; }
+  };
+
+  const loadStudentFiles = async (id) => {
+    setFilesLoading(true);
+    if (docBlob?.blobUrl) URL.revokeObjectURL(docBlob.blobUrl);
+    if (imgBlob?.blobUrl) URL.revokeObjectURL(imgBlob.blobUrl);
+    setDocBlob(null);
+    setImgBlob(null);
+    const [doc, img] = await Promise.all([
+      fetchBlobForStudent(`/contributions/${id}/file`),
+      fetchBlobForStudent(`/contributions/${id}/image`),
+    ]);
+    setDocBlob(doc || null);
+    setImgBlob(img || null);
+    setFilesLoading(false);
+  };
+
   const openDetail = async (contrib) => {
     setSelected(contrib);
     setDetail(null);
@@ -141,6 +181,7 @@ function StudentDashboard() {
       }
     } catch {}
     setDetailLoading(false);
+    loadStudentFiles(cid(contrib));
   };
 
   const avatarInfo = user
@@ -228,6 +269,7 @@ function StudentDashboard() {
               ) : (
                 <div className="card">
                   <div className="ch"><div className="ch-title">📅 Important Deadlines</div></div>
+                  <div style={{ overflowX: "auto", WebkitOverflowScrolling: "touch" }}>
                   <table className="data-table">
                     <thead>
                       <tr><th>Milestone</th><th>Date</th><th>Status</th></tr>
@@ -264,6 +306,7 @@ function StudentDashboard() {
                       )}
                     </tbody>
                   </table>
+                  </div>
                 </div>
               )}
             </>
@@ -353,7 +396,7 @@ function StudentDashboard() {
           )}
 
           {/* ── Two-column: Contributions (left) + Detail (right) ── */}
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 18, alignItems: "start", marginBottom: 18 }}>
+          <div className="two-col">
 
           {/* LEFT — contributions table */}
           <div className="card" style={{ marginBottom: 0 }}>
@@ -380,7 +423,7 @@ function StudentDashboard() {
               <div style={{ maxHeight: 480, overflowY: "auto" }}>
                 {contributions.map((c, i) => {
                   const isActive   = cid(c) === cid(selected);
-                  const status     = st(c.status);
+                  const status     = getStatus(c);
                   const isPending  = status === "PENDING" || status === "SUBMITTED";
                   const isSelected = status === "SELECTED";
                   const isRejected = status === "REJECTED";
@@ -430,12 +473,17 @@ function StudentDashboard() {
               <div className="card">
                 <div className="ch">
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div className="ch-title" style={{ fontSize: 15 }}>
+                    <div className="ch-title" style={{ fontSize: 15, display: "flex", alignItems: "center", gap: 8 }}>
+                      <button
+                        onClick={() => { setSelected(null); setDetail(null); setDocBlob(null); setImgBlob(null); }}
+                        style={{ background: "none", border: "none", cursor: "pointer", fontSize: 18, color: "var(--blue)", padding: 0, lineHeight: 1 }}
+                        title="Close"
+                      >←</button>
                       {displayDetail?.contributionTitle || displayDetail?.title || "Untitled"}
                     </div>
-                    <div className="ch-sub">Submitted {fmtDate(displayDetail?.createdAt)}</div>
+                    <div className="ch-sub">Submitted {fmtDate(displayDetail?.submittedAt || displayDetail?.createdAt)}</div>
                   </div>
-                  <StatusBadge status={displayDetail?.status} createdAt={displayDetail?.createdAt} />
+                  <StatusBadge c={displayDetail} />
                 </div>
 
                 <div className="cb">
@@ -448,24 +496,24 @@ function StudentDashboard() {
                       {/* Meta grid */}
                       <div className="meta-grid" style={{ marginBottom: 16 }}>
                         <div className="meta-box">
-                          <div className="meta-key">Faculty</div>
-                          <div className="meta-val">{facultyName || "—"}</div>
+                          <div className="meta-key">Submitted</div>
+                          <div className="meta-val">{fmtDate(displayDetail?.submittedAt || displayDetail?.createdAt) || "—"}</div>
                         </div>
-                        <div className="meta-box">
-                          <div className="meta-key">Images</div>
-                          <div className="meta-val">
-                            {displayDetail?.images?.length ?? displayDetail?.imageCount ?? "—"}
+                        {(displayDetail?.updatedAt && displayDetail.updatedAt !== displayDetail.createdAt) && (
+                          <div className="meta-box">
+                            <div className="meta-key">Last Updated</div>
+                            <div className="meta-val">{fmtDate(displayDetail.updatedAt)}</div>
                           </div>
-                        </div>
+                        )}
                         <div className="meta-box">
                           <div className="meta-key">Status</div>
-                          <div className="meta-val"><StatusBadge status={displayDetail?.status} createdAt={displayDetail?.createdAt} /></div>
+                          <div className="meta-val"><StatusBadge c={displayDetail} /></div>
                         </div>
                         <div className="meta-box">
                           <div className="meta-key">Feedback</div>
                           <div className="meta-val" style={{ fontSize: 13 }}>
                             {(() => {
-                              const ds = (displayDetail?.status || "").toUpperCase();
+                              const ds = getStatus(displayDetail);
                               if (comments.length > 0 || ds === "REVIEWED") return <span style={{ color: "var(--success)" }}>✔ Received</span>;
                               if (ds === "PENDING" || ds === "SUBMITTED" || ds === "UPDATE" || ds === "UPDATED") {
                                 const subDate = parseDate(displayDetail?.createdAt);
@@ -515,8 +563,67 @@ function StudentDashboard() {
                         </div>
                       )}
 
+                      {/* Uploaded files */}
+                      <div style={{ marginBottom: 16 }}>
+                        <div style={{ fontSize: 13, fontWeight: 600, color: "var(--navy)", marginBottom: 10 }}>
+                          📎 Uploaded Files
+                        </div>
+                        {filesLoading ? (
+                          <div style={{ fontSize: 13, color: "var(--text-muted)" }}>Loading files…</div>
+                        ) : (
+                          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                            {/* Document */}
+                            <div style={{ background: "var(--sky)", borderRadius: 8, padding: "10px 14px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                                <span style={{ fontSize: 18 }}>📄</span>
+                                <div>
+                                  <div style={{ fontSize: 13, fontWeight: 600, color: "var(--navy)" }}>
+                                    {displayDetail?.originalFileName || displayDetail?.fileName || displayDetail?.fileUrl?.split("/").pop() || "Article Document"}
+                                  </div>
+                                  <div style={{ fontSize: 11, color: "var(--text-muted)" }}>Word Document</div>
+                                </div>
+                              </div>
+                              {docBlob && (
+                                <a
+                                  href={docBlob.blobUrl}
+                                  download={displayDetail?.originalFileName || displayDetail?.fileName || "document.docx"}
+                                  className="btn btn-outline btn-sm"
+                                  style={{ textDecoration: "none" }}
+                                >
+                                  ⬇ Download
+                                </a>
+                              )}
+                            </div>
+                            {/* Image */}
+                            {imgBlob && (
+                              <div style={{ background: "var(--sky)", borderRadius: 8, padding: "10px 14px" }}>
+                                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 8 }}>
+                                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                                    <span style={{ fontSize: 18 }}>🖼️</span>
+                                    <div style={{ fontSize: 13, fontWeight: 600, color: "var(--navy)" }}>Supporting Image</div>
+                                  </div>
+                                  <a
+                                    href={imgBlob.blobUrl}
+                                    download={displayDetail?.imageName || displayDetail?.imageFileName || "image"}
+                                    className="btn btn-outline btn-sm"
+                                    style={{ textDecoration: "none" }}
+                                  >
+                                    ⬇ Download
+                                  </a>
+                                </div>
+                                <img
+                                  src={imgBlob.blobUrl}
+                                  alt="Uploaded image"
+                                  style={{ width: "100%", maxHeight: 260, objectFit: "contain", borderRadius: 6, background: "#fff", display: "block" }}
+                                />
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+
                       {/* Edit button — available until final closure date, for any non-selected status */}
-                      {st(displayDetail?.status) !== "SELECTED" && (
+                      {getStatus(displayDetail) !== "SELECTED" && (
                         canEdit ? (
                           <Link
                             href={`/user/student/submit?edit=${cid(displayDetail)}`}

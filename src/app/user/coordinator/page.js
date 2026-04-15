@@ -3,11 +3,12 @@ import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import Topbar from "@/components/Topbar";
 import Sidebar from "@/components/Sidebar";
-import { getUser, getAccessToken } from "@/lib/api";
+import { getUser, getAccessToken, BASE_URL, get } from "@/lib/api";
 import { listContributions, getContribution, selectContribution } from "@/lib/services/contributions";
 import { addComment, getComments } from "@/lib/services/comments";
 import { listFaculties } from "@/lib/services/faculties";
 import { listAcademicYears } from "@/lib/services/closures";
+import mammoth from "mammoth";
 
 /* ── helpers ── */
 function fmtDate(d) {
@@ -58,9 +59,117 @@ function StatusBadge({ c, daysOld }) {
   return <span className="badge b-blue">⏳ Submitted</span>;
 }
 
+/* Fetch a file and return { blobUrl, mimeType, blob } or { error, status }.
+   Accepts either a full HTTP URL (e.g. MinIO presigned) or an API-relative path. */
+async function fetchBlobUrl(endpointOrUrl) {
+  const isFullUrl = /^https?:\/\//.test(endpointOrUrl);
+  const buildUrl  = (ep) => isFullUrl ? ep : `${BASE_URL}${ep}`;
+
+  const doFetch = async (withAuth) => {
+    let token = getAccessToken();
+    const headers = withAuth && token ? { Authorization: `Bearer ${token}` } : {};
+    let res = await fetch(buildUrl(endpointOrUrl), { headers });
+
+    /* 401 — attempt one token refresh then retry */
+    if (res.status === 401 && withAuth) {
+      try {
+        const refreshRes = await fetch(`${BASE_URL}/auth/refresh`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ refreshToken: localStorage.getItem("refreshToken") }),
+        });
+        const refreshData = await refreshRes.json();
+        if (refreshData?.data?.accessToken) {
+          token = refreshData.data.accessToken;
+          localStorage.setItem("accessToken", token);
+          res = await fetch(buildUrl(endpointOrUrl), {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+        }
+      } catch { /* refresh failed */ }
+    }
+    return res;
+  };
+
+  try {
+    /* Full URLs: try without auth first (presigned/public), then with auth on 401 */
+    let res = await doFetch(!isFullUrl);
+    if (!res.ok && isFullUrl && res.status === 401) {
+      res = await doFetch(true);
+    }
+
+    if (!res.ok) {
+      let msg = `HTTP ${res.status}`;
+      try {
+        const ct = res.headers.get("content-type") || "";
+        if (ct.includes("application/json")) {
+          const j = await res.json();
+          msg = j?.message || msg;
+        }
+      } catch {}
+      return { error: msg, status: res.status };
+    }
+
+    const blob = await res.blob();
+    if (blob.size === 0) return { error: "File is empty", status: 200 };
+    return { blobUrl: URL.createObjectURL(blob), mimeType: blob.type, blob };
+  } catch (err) {
+    return { error: err.message || "Network error", status: 0 };
+  }
+}
+
+function triggerDownload(blobUrl, fileName) {
+  const a = document.createElement("a");
+  a.href = blobUrl;
+  a.download = fileName || "download";
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+}
+
+async function viewDocument(blob, fileName) {
+  try {
+    const arrayBuffer = await blob.arrayBuffer();
+    const result = await mammoth.convertToHtml({ arrayBuffer });
+    const html = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>${fileName || "Document"}</title>
+  <style>
+    body { font-family: Calibri, Arial, sans-serif; max-width: 860px; margin: 0 auto; padding: 0 24px 40px; line-height: 1.7; color: #222; }
+    h1,h2,h3,h4 { margin-top: 1.2em; }
+    p { margin: 0.6em 0; }
+    img { max-width: 100%; }
+    .doc-toolbar { position: sticky; top: 0; background: #f0f4fa; border-bottom: 1px solid #ccd6e8; padding: 10px 0; margin: 0 -24px 24px; display: flex; align-items: center; gap: 12px; padding-left: 24px; z-index: 10; }
+    .doc-toolbar button { background: #1a4a8a; color: #fff; border: none; border-radius: 6px; padding: 6px 16px; font-size: 13px; cursor: pointer; font-family: inherit; }
+    .doc-toolbar button.outline { background: none; color: #1a4a8a; border: 1.5px solid #1a4a8a; }
+    .doc-toolbar .doc-name { font-size: 13px; font-weight: 600; color: #1a4a8a; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  </style>
+</head>
+<body>
+  <div class="doc-toolbar">
+    <button class="outline" onclick="window.close()">← Close Tab</button>
+    <span class="doc-name">📄 ${fileName || "Document"}</span>
+    <button onclick="window.print()">🖨 Print</button>
+  </div>
+  ${result.value}
+</body>
+</html>`;
+    const htmlBlob = new Blob([html], { type: "text/html" });
+    const htmlUrl = URL.createObjectURL(htmlBlob);
+    window.open(htmlUrl, "_blank");
+  } catch {
+    /* fallback: just open the raw blob url — browser may still download it */
+    window.open(URL.createObjectURL(blob), "_blank");
+  }
+}
+
 export default function CoordinatorPage() {
   const router = useRouter();
   const [user, setUser] = useState(null);
+
+  const [activePage,       setActivePage]       = useState("contributions"); // "contributions" | "guests"
 
   const [contributions,    setContributions]    = useState([]);
   const [allContributions, setAllContributions] = useState([]);
@@ -73,6 +182,9 @@ export default function CoordinatorPage() {
   const [search,           setSearch]           = useState("");
   const [activeTab,        setActiveTab]        = useState("all");
 
+  /* guest visitors page */
+  const [guestSearch,  setGuestSearch]  = useState("");
+
   const [facultyMap,       setFacultyMap]       = useState({});
   const [finalClosureDate, setFinalClosureDate] = useState(null);
 
@@ -84,13 +196,28 @@ export default function CoordinatorPage() {
   const [success,        setSuccess]        = useState("");
   const [loginAt,        setLoginAt]        = useState(null);
 
+  /* blob URLs for the currently-open contribution's files */
+  const [docBlob,      setDocBlob]      = useState(null); // { blobUrl, mimeType } | null
+  const [imgBlob,      setImgBlob]      = useState(null); // { blobUrl, mimeType } | null
+  const [filesLoading, setFilesLoading] = useState(false);
+  const [fileErr,      setFileErr]      = useState("");   // error from doc endpoint
+  const [imgErr,       setImgErr]       = useState("");   // error from image endpoint
+
+  /* guest visitors */
+  const [guestLogins,     setGuestLogins]     = useState([]);
+  const [guestLoading,    setGuestLoading]    = useState(false);
+
   useEffect(() => {
     if (!getAccessToken()) { router.push("/login"); return; }
-    setUser(getUser());
+    const u = getUser();
+    setUser(u);
     setLoginAt(localStorage.getItem("loginAt") || null);
     fetchLookups();
     fetchContributions();
+    fetchGuestLogins();
   }, []);
+
+
 
   const fetchLookups = async () => {
     try {
@@ -110,6 +237,30 @@ export default function CoordinatorPage() {
         }
       }
     } catch {}
+  };
+
+  const fetchGuestLogins = async (q = guestSearch) => {
+    setGuestLoading(true);
+    try {
+      const params = { page: 1, pageSize: 100 };
+      if (q) params.search = q;
+      const res = await get("/users/guest-logins", params);
+      if (res?.success) {
+        let items = res.data?.items ?? res.data?.data ?? [];
+
+        /* Safety filter: keep only guests whose faculty matches this coordinator's faculty.
+           The API should already scope by faculty for coordinator tokens, but we
+           enforce it client-side to ensure no cross-faculty data leaks through. */
+        const me = getUser();
+        const myFacultyId = me?.facultyId || me?.faculty?.facultyId;
+        if (myFacultyId) {
+          items = items.filter(g => g.faculty?.facultyId === myFacultyId);
+        }
+
+        setGuestLogins(items);
+      }
+    } catch {}
+    finally { setGuestLoading(false); }
   };
 
   const isMounted = useRef(false);
@@ -143,7 +294,7 @@ export default function CoordinatorPage() {
       const allItems = await fetchAllPages({});
       setAllContributions(allItems);
       const filtered = statusFilter
-        ? allItems.filter((c) => (c.status || "").toLowerCase() === statusFilter.toLowerCase())
+        ? allItems.filter((c) => getStatus(c) === statusFilter)
         : allItems;
       setContributions(filtered);
     } catch (err) {
@@ -153,7 +304,42 @@ export default function CoordinatorPage() {
     }
   };
 
+  /* Revoke old blob URLs to free memory */
+  const clearBlobs = () => {
+    if (docBlob?.blobUrl) URL.revokeObjectURL(docBlob.blobUrl);
+    if (imgBlob?.blobUrl) URL.revokeObjectURL(imgBlob.blobUrl);
+    setDocBlob(null);
+    setImgBlob(null);
+    setFileErr("");
+    setImgErr("");
+  };
+
+  /* Load (or reload) file + image for the given contribution ID */
+  const loadFiles = async (id) => {
+    setFilesLoading(true);
+    setFileErr("");
+    setImgErr("");
+    const [doc, img] = await Promise.all([
+      fetchBlobUrl(`/contributions/${id}/file`),
+      fetchBlobUrl(`/contributions/${id}/image`),
+    ]);
+    if (doc?.blobUrl) {
+      setDocBlob(doc);
+    } else {
+      setDocBlob(null);
+      setFileErr(doc?.error || "Could not load document.");
+    }
+    if (img?.blobUrl) {
+      setImgBlob(img);
+    } else {
+      setImgBlob(null);
+      setImgErr(img?.error || "Could not load image.");
+    }
+    setFilesLoading(false);
+  };
+
   const openDetail = async (contrib) => {
+    clearBlobs();
     setSelected(contrib);
     setShowDetail(true);
     setFullDetail(null);
@@ -162,10 +348,13 @@ export default function CoordinatorPage() {
     setError("");
     setSuccess("");
     setDetailLoading(true);
+
+    const id = cid(contrib);
+
     try {
       const [detailRes, commentsRes] = await Promise.all([
-        getContribution(cid(contrib)),
-        getComments(cid(contrib)),
+        getContribution(id),
+        getComments(id),
       ]);
       if (detailRes.success !== false) {
         const d = detailRes.data ?? detailRes;
@@ -184,6 +373,8 @@ export default function CoordinatorPage() {
       }
     } catch {}
     finally { setDetailLoading(false); }
+
+    loadFiles(id);
   };
 
   const handleAddComment = async () => {
@@ -248,7 +439,13 @@ export default function CoordinatorPage() {
   };
 
   const resolveStudent = (c) =>
-    c?.user?.username || c?.studentName || c?.student?.username || c?.submittedByName || null;
+    c?.student?.user?.username || c?.student?.user?.name  ||   // confirmed API path
+    c?.student?.username       || c?.student?.name        ||
+    c?.user?.username          || c?.user?.name           || c?.user?.fullName  ||
+    c?.studentName             || c?.studentUsername      || c?.submittedByName ||
+    c?.submittedBy?.username   || c?.submittedBy?.name    ||
+    c?.author?.username        || c?.author?.name         ||
+    c?.createdBy?.username     || c?.createdBy?.name      || null;
 
   const resolveFaculty = (c) => {
     const fid = c?.facultyId || c?.faculty?.facultyId || c?.user?.facultyId || c?.student?.facultyId;
@@ -309,8 +506,30 @@ export default function CoordinatorPage() {
       {
         title: "Contributions",
         items: [
-          { icon: "🗂", label: "All Contributions", href: "/user/coordinator", active: true, badge: totalAll > 0 ? String(totalAll) : undefined, badgeColor: "blue" },
-          { icon: "⚠️", label: "Overdue", href: "#", badge: overdueAll > 0 ? String(overdueAll) : undefined, badgeColor: "red" },
+          {
+            icon: "🗂",
+            label: "All Contributions",
+            active: activePage === "contributions",
+            badge: totalAll > 0 ? String(totalAll) : undefined,
+            badgeColor: "blue",
+            onClick: () => setActivePage("contributions"),
+          },
+        ],
+      },
+      {
+        title: "Activity",
+        items: [
+          {
+            icon: "👥",
+            label: "Guest Visitors",
+            active: activePage === "guests",
+            badge: guestLogins.length > 0 ? String(guestLogins.length) : undefined,
+            badgeColor: "orange",
+            onClick: () => {
+              setActivePage("guests");
+              fetchGuestLogins(guestSearch);
+            },
+          },
         ],
       },
     ],
@@ -325,6 +544,100 @@ export default function CoordinatorPage() {
         <Sidebar {...sidebarConfig} />
         <main className="main-content">
 
+          {/* ══════════════════════════════════════════
+               GUEST VISITORS PAGE
+          ══════════════════════════════════════════ */}
+          {activePage === "guests" && (
+            <>
+              <div className="pg-header">
+                <div>
+                  <div className="pg-title">Guest Visitors</div>
+                  <div className="pg-sub">{facultyName} · {guestLogins.length} guest{guestLogins.length !== 1 ? "s" : ""} visited your faculty magazine</div>
+                </div>
+                <button className="btn btn-outline btn-sm" onClick={() => fetchGuestLogins(guestSearch)} disabled={guestLoading}>
+                  ↺ Refresh
+                </button>
+              </div>
+
+              {/* Search */}
+              <div className="adm-search-box" style={{ marginBottom: 16 }}>
+                <span>🔍</span>
+                <input
+                  type="text"
+                  placeholder="Search by guest email…"
+                  value={guestSearch}
+                  onChange={(e) => { setGuestSearch(e.target.value); fetchGuestLogins(e.target.value); }}
+                />
+              </div>
+
+              <div className="card" style={{ marginBottom: 0 }}>
+                <div className="ch">
+                  <div className="ch-title">Guest Login Records</div>
+                  <div className="ch-sub">Guests who accessed your faculty&apos;s magazine</div>
+                </div>
+
+                {guestLoading ? (
+                  <div style={{ padding: "40px 0", textAlign: "center", color: "var(--text-muted)", fontSize: 14 }}>Loading…</div>
+                ) : guestLogins.length === 0 ? (
+                  <div className="cb">
+                    <div className="alert info" style={{ margin: 0 }}>
+                      <span className="alert-icon">👥</span>
+                      <div>No guest visitors yet. Guests will appear here when they access your faculty magazine.</div>
+                    </div>
+                  </div>
+                ) : (
+                  <div style={{ overflowX: "auto" }}>
+                    <table className="data-table">
+                      <thead>
+                        <tr>
+                          <th>#</th>
+                          <th>Email</th>
+                          <th>Username</th>
+                          <th>Faculty</th>
+                          <th>Visited</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {guestLogins.map((g, i) => {
+                          const email    = g.email || g.user?.email || "—";
+                          const username = g.user?.username || "—";
+                          const faculty  = g.faculty?.facultyName || "—";
+                          const date     = g.createdAt
+                            ? new Date(g.createdAt).toLocaleString("en-GB", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })
+                            : "—";
+                          return (
+                            <tr key={g.guestFacultyLoginId || i}>
+                              <td style={{ color: "var(--text-muted)", width: 40 }}>{i + 1}</td>
+                              <td>
+                                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                                  <span style={{ fontSize: 18 }}>👤</span>
+                                  <span style={{ fontWeight: 600 }}>{email}</span>
+                                </div>
+                              </td>
+                              <td style={{ color: "var(--text-muted)" }}>{username}</td>
+                              <td><span className="badge b-blue">{faculty}</span></td>
+                              <td style={{ color: "var(--text-muted)", fontSize: 12 }}>{date}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+                {guestLogins.length > 0 && (
+                  <div style={{ padding: "10px 16px", fontSize: 12, color: "var(--text-muted)", borderTop: "1px solid var(--border)" }}>
+                    {guestLogins.length} guest visitor{guestLogins.length !== 1 ? "s" : ""}
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+
+          {/* ══════════════════════════════════════════
+               CONTRIBUTIONS PAGE
+          ══════════════════════════════════════════ */}
+          {activePage === "contributions" && (<>
+
           {/* Page header */}
           <div className="pg-header">
             <div>
@@ -332,7 +645,7 @@ export default function CoordinatorPage() {
                 {showDetail && selected
                   ? <span style={{ display: "flex", alignItems: "center", gap: 10 }}>
                       <button
-                        onClick={() => { setShowDetail(false); setSelected(null); setFullDetail(null); setError(""); setSuccess(""); }}
+                        onClick={() => { clearBlobs(); setShowDetail(false); setSelected(null); setFullDetail(null); setError(""); setSuccess(""); }}
                         style={{ background: "none", border: "none", cursor: "pointer", fontSize: 18, color: "var(--blue)", padding: 0, lineHeight: 1 }}
                         title="Back to list"
                       >←</button>
@@ -361,7 +674,7 @@ export default function CoordinatorPage() {
           )}
 
           {/* Stats */}
-          <div className="stats" style={{ gridTemplateColumns: "repeat(5,1fr)", marginBottom: 20 }}>
+          <div className="stats-5">
             <div className="stat">
               <div className="stat-n">{loading ? "…" : totalAll}</div>
               <div className="stat-l">Total</div>
@@ -384,7 +697,7 @@ export default function CoordinatorPage() {
             </div>
           </div>
 
-          {/* Overdue alert */}
+
 
           {/* Alerts */}
           {success && (
@@ -418,10 +731,10 @@ export default function CoordinatorPage() {
                   style={{ border: "1.5px solid var(--border)", borderRadius: 7, padding: "8px 12px", fontFamily: "inherit", fontSize: 13, color: "var(--text)" }}
                 >
                   <option value="">All Statuses</option>
-                  <option value="Submitted">Submitted</option>
-                  <option value="reviewed">Reviewed</option>
-                  <option value="Update">Updated</option>
-                  <option value="Selected">Selected</option>
+                  <option value="SUBMITTED">Submitted</option>
+                  <option value="REVIEWED">Reviewed</option>
+                  <option value="UPDATED">Updated</option>
+                  <option value="SELECTED">Selected</option>
                 </select>
                 {(search || statusFilter) && (
                   <button
@@ -500,10 +813,11 @@ export default function CoordinatorPage() {
                 ) : (
                   <div>
                     {tabFiltered.map((c, i) => {
-                      const days   = daysAgo(c.createdAt);
-                      const isOver = isNotReviewed(c) && days > 14;
-                      const student   = resolveStudent(c);
-                      const faculty   = resolveFaculty(c);
+                      const days    = daysAgo(c.createdAt);
+                      const isOver  = isNotReviewed(c) && days > 14;
+                      const student = resolveStudent(c)
+                        || c?.user?.email || c?.email || c?.studentEmail || "Unknown Student";
+                      const faculty = resolveFaculty(c);
                       return (
                         <div
                           key={cid(c) || i}
@@ -519,18 +833,16 @@ export default function CoordinatorPage() {
                         >
                           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
                             <div style={{ flex: 1, minWidth: 0 }}>
-                              <div style={{ fontSize: 13.5, fontWeight: 600, color: "var(--navy)", marginBottom: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                              <div style={{ fontSize: 13.5, fontWeight: 600, color: "var(--navy)", marginBottom: 4, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                                 {c.contributionTitle || c.title || "Untitled"}
                               </div>
-                              {(student || faculty) && (
-                                <div style={{ fontSize: 12, color: "var(--text-mid)", marginBottom: 2 }}>
-                                  {student && <span style={{ fontWeight: 500 }}>{student}</span>}
-                                  {student && faculty && " · "}
-                                  {faculty && <span>{faculty}</span>}
-                                </div>
-                              )}
+                              <div style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 12, color: "var(--text-mid)", marginBottom: 3 }}>
+                                <span>👤</span>
+                                <span style={{ fontWeight: 600, color: "var(--navy)" }}>{student}</span>
+                                {faculty && <><span style={{ color: "var(--text-muted)" }}>·</span><span>{faculty}</span></>}
+                              </div>
                               <div style={{ fontSize: 11.5, color: "var(--text-muted)" }}>
-                                {fmtDate(c.createdAt)}
+                                📅 {fmtDate(c.createdAt || c.submittedAt)}
                               </div>
                             </div>
                             <StatusBadge c={c} daysOld={days} />
@@ -554,8 +866,8 @@ export default function CoordinatorPage() {
                   </div>
                   <div className="ch-sub">
                     {resolveStudent(detail)
-                      ? <>{resolveStudent(detail)} · Submitted {fmtDate(detail?.createdAt)}</>
-                      : detail?.createdAt ? <>Submitted {fmtDate(detail.createdAt)}</> : null
+                      ? <><strong>{resolveStudent(detail)}</strong> · Submitted {fmtDate(detail?.submittedAt || detail?.createdAt)}</>
+                      : (detail?.submittedAt || detail?.createdAt) ? <>Submitted {fmtDate(detail?.submittedAt || detail?.createdAt)}</> : null
                     }
                   </div>
                 </div>
@@ -569,35 +881,33 @@ export default function CoordinatorPage() {
                   </div>
                 ) : (
                   <>
-                    {/* Meta grid */}
-                    {(resolveStudent(detail) || resolveFaculty(detail) || detail?.createdAt || detail?.updatedAt) && (
-                      <div className="meta-grid" style={{ marginBottom: 16 }}>
-                        {resolveStudent(detail) && (
-                          <div className="meta-box">
-                            <div className="meta-key">Student</div>
-                            <div className="meta-val">{resolveStudent(detail)}</div>
-                          </div>
-                        )}
-                        {resolveFaculty(detail) && (
-                          <div className="meta-box">
-                            <div className="meta-key">Faculty</div>
-                            <div className="meta-val">{resolveFaculty(detail)}</div>
-                          </div>
-                        )}
-                        {detail?.createdAt && (
-                          <div className="meta-box">
-                            <div className="meta-key">Submitted</div>
-                            <div className="meta-val">{fmtDate(detail.createdAt)}</div>
-                          </div>
-                        )}
-                        {detail?.updatedAt && (
-                          <div className="meta-box">
-                            <div className="meta-key">Last Updated</div>
-                            <div className="meta-val">{fmtDate(detail.updatedAt)}</div>
-                          </div>
-                        )}
+                    {/* ── Author + submission info (always visible) ── */}
+                    <div className="meta-grid" style={{ marginBottom: 16 }}>
+                      <div className="meta-box">
+                        <div className="meta-key">Author</div>
+                        <div className="meta-val" style={{ fontWeight: 600 }}>
+                          {resolveStudent(detail) || "—"}
+                        </div>
                       </div>
-                    )}
+                      {resolveFaculty(detail) && (
+                        <div className="meta-box">
+                          <div className="meta-key">Faculty</div>
+                          <div className="meta-val">{resolveFaculty(detail)}</div>
+                        </div>
+                      )}
+                      <div className="meta-box">
+                        <div className="meta-key">Submitted</div>
+                        <div className="meta-val">
+                          {fmtDate(detail?.submittedAt || detail?.createdAt) || "—"}
+                        </div>
+                      </div>
+                      {detail?.updatedAt && detail.updatedAt !== detail.createdAt && (
+                        <div className="meta-box">
+                          <div className="meta-key">Last Updated</div>
+                          <div className="meta-val">{fmtDate(detail.updatedAt)}</div>
+                        </div>
+                      )}
+                    </div>
 
                     {/* Description */}
                     {detail?.description ? (
@@ -610,23 +920,116 @@ export default function CoordinatorPage() {
                       </div>
                     )}
 
-                    {/* File download */}
-                    {(detail?.fileUrl || detail?.file?.url || detail?.documentUrl) && (
-                      <div style={{ marginBottom: 16 }}>
-                        <a
-                          href={detail.fileUrl || detail.file?.url || detail.documentUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="btn btn-outline btn-sm"
-                          style={{ textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 6 }}
-                        >
-                          📄 Download Document
-                        </a>
+                    {/* ── Attached files ── */}
+                    <div style={{ marginBottom: 16 }}>
+                      <div style={{ fontSize: 13, fontWeight: 600, color: "var(--navy)", marginBottom: 10 }}>
+                        📎 Attached Files
                       </div>
-                    )}
+
+                      {filesLoading ? (
+                        <div style={{ fontSize: 13, color: "var(--text-muted)", padding: "8px 0" }}>Loading files…</div>
+                      ) : (
+                        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+
+                          {/* Document */}
+                          <div style={{ background: "var(--sky)", borderRadius: 8, padding: "12px 14px" }}>
+                            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                                <span style={{ fontSize: 20 }}>📄</span>
+                                <div>
+                                  <div style={{ fontSize: 13, fontWeight: 600, color: "var(--navy)" }}>
+                                    {detail?.originalFileName || detail?.fileName || detail?.file?.name || "Article Document"}
+                                  </div>
+                                  <div style={{ fontSize: 11, color: "var(--text-muted)" }}>Word Document (.doc / .docx)</div>
+                                </div>
+                              </div>
+                              <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                                {docBlob ? (
+                                  <>
+                                    <button
+                                      className="btn btn-outline btn-sm"
+                                      onClick={() => {
+                                        const origName = detail?.originalFileName || detail?.fileName || "document.docx";
+                                        viewDocument(docBlob.blob, origName);
+                                      }}
+                                    >
+                                      👁 View
+                                    </button>
+                                    <button
+                                      className="btn btn-navy btn-sm"
+                                      onClick={() => {
+                                        const student  = resolveStudent(detail) || "student";
+                                        const origName = detail?.originalFileName || detail?.fileName || `contribution-${cid(detail)}.docx`;
+                                        triggerDownload(docBlob.blobUrl, `${student}_${origName}`);
+                                      }}
+                                    >
+                                      ⬇ Download
+                                    </button>
+                                  </>
+                                ) : (
+                                  <>
+                                    <span style={{ fontSize: 11, color: "var(--danger, #b52a2a)" }}>{fileErr || "Failed to load"}</span>
+                                    <button
+                                      className="btn btn-outline btn-sm"
+                                      onClick={() => loadFiles(cid(detail))}
+                                    >↻ Retry</button>
+                                  </>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Image */}
+                          <div style={{ background: "var(--sky)", borderRadius: 8, padding: "12px 14px" }}>
+                            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: imgBlob ? 10 : 0 }}>
+                              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                                <span style={{ fontSize: 20 }}>🖼️</span>
+                                <div>
+                                  <div style={{ fontSize: 13, fontWeight: 600, color: "var(--navy)" }}>
+                                    {detail?.imageName || detail?.imageFileName || detail?.image?.name || "Supporting Image"}
+                                  </div>
+                                  <div style={{ fontSize: 11, color: "var(--text-muted)" }}>Image</div>
+                                </div>
+                              </div>
+                              <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                                {imgBlob ? (
+                                  <button
+                                    className="btn btn-navy btn-sm"
+                                    onClick={() => {
+                                      const student  = resolveStudent(detail) || "student";
+                                      const origName = detail?.imageName || detail?.imageFileName || `contribution-image-${cid(detail)}`;
+                                      triggerDownload(imgBlob.blobUrl, `${student}_${origName}`);
+                                    }}
+                                  >
+                                    ⬇ Download
+                                  </button>
+                                ) : (
+                                  <>
+                                    <span style={{ fontSize: 11, color: "var(--danger, #b52a2a)" }}>{imgErr || "Failed to load"}</span>
+                                    <button
+                                      className="btn btn-outline btn-sm"
+                                      onClick={() => loadFiles(cid(detail))}
+                                    >↻ Retry</button>
+                                  </>
+                                )}
+                              </div>
+                            </div>
+                            {/* Inline image preview */}
+                            {imgBlob && (
+                              <img
+                                src={imgBlob.blobUrl}
+                                alt="Supporting image"
+                                style={{ width: "100%", maxHeight: 320, objectFit: "contain", borderRadius: 6, background: "#fff", display: "block" }}
+                              />
+                            )}
+                          </div>
+
+                        </div>
+                      )}
+                    </div>
 
                     {/* Action buttons */}
-                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 16 }}>
+                    <div className="action-grid">
                       <button
                         className="btn btn-success"
                         onClick={() => handleSelect(true)}
@@ -712,6 +1115,8 @@ export default function CoordinatorPage() {
               </div>
             </div>
           )}
+
+          </>)} {/* end activePage === "contributions" */}
 
         </main>
       </div>

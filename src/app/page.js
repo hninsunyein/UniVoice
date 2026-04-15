@@ -16,18 +16,13 @@ const bgPool = [
   "linear-gradient(135deg,#f0d8f8,#e0b8f0)",
 ];
 
-function fmtDate(d) {
-  if (!d) return "—";
-  return new Date(d).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
-}
-
 export default function LandingPage() {
-  const [faculties,       setFaculties]       = useState([]);
-  const [showModal,       setShowModal]       = useState(false);
-  const [guestEmail,      setGuestEmail]      = useState("");
-  const [guestFacultyId,  setGuestFacultyId]  = useState("");
-  const [guestLoading,    setGuestLoading]    = useState(false);
-  const [modalError,      setModalError]      = useState("");
+  const [faculties,        setFaculties]        = useState([]);
+  const [showModal,        setShowModal]        = useState(false);
+  const [guestEmail,       setGuestEmail]       = useState("");
+  const [guestFacultyId,   setGuestFacultyId]   = useState("");
+  const [guestLoading,     setGuestLoading]     = useState(false);
+  const [modalError,       setModalError]       = useState("");
   const [pendingFacultyId, setPendingFacultyId] = useState(null);
   const magRef = useRef(null);
 
@@ -59,6 +54,7 @@ export default function LandingPage() {
     setShowModal(true);
   };
 
+  /* Guest login — email + faculty only, no password */
   const handleGuestLogin = async () => {
     if (!guestEmail.trim()) { setModalError("Please enter your email address."); return; }
     if (!guestFacultyId)    { setModalError("Please select a faculty."); return; }
@@ -193,7 +189,7 @@ export default function LandingPage() {
         <p>© 2026 University Magazine Portal · UniVoice · <a href="#">Terms</a> · <a href="#">Privacy</a></p>
       </div>
 
-      {/* ── GUEST ACCESS MODAL ── */}
+      {/* ── GUEST ACCESS MODAL — email + faculty only, no password ── */}
       {showModal && (
         <div
           className="lp-modal-overlay"
