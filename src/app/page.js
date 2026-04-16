@@ -186,7 +186,7 @@ export default function LandingPage() {
 
       {/* ── FOOTER ── */}
       <div className="lp-footer">
-        <p>© 2026 University Magazine Portal · UniVoice · <a href="#">Terms</a> · <a href="#">Privacy</a></p>
+        <p>© 2026 University Magazine Portal · UniVoice</p>
       </div>
 
       {/* ── GUEST ACCESS MODAL — email + faculty only, no password ── */}

@@ -6,6 +6,7 @@ import Sidebar from "@/components/Sidebar";
 import { getUser, getAccessToken, BASE_URL } from "@/lib/api";
 import { listContributions, getContribution } from "@/lib/services/contributions";
 import mammoth from "mammoth";
+import JSZip from "jszip";
 import { getDashboardSummary, getStatistics } from "@/lib/services/reports";
 import { listAcademicYears } from "@/lib/services/closures";
 import { listFaculties } from "@/lib/services/faculties";
@@ -146,6 +147,7 @@ function ManagerContent() {
   const [fileErr,         setFileErr]         = useState("");
   const [imgErr,          setImgErr]          = useState("");
   const [facultyFilter,   setFacultyFilter]   = useState("");
+  const [faculties,       setFaculties]       = useState([]);
 
   useEffect(() => {
     if (!getAccessToken()) { router.push("/login"); return; }
@@ -173,15 +175,19 @@ function ManagerContent() {
       ]);
       if (yearsRes.success && Array.isArray(yearsRes.data)) {
         setAcademicYears(yearsRes.data);
-        const firstId = yearsRes.data[0]?.academicYearId || yearsRes.data[0]?.id || "";
-        setSelectedYear(firstId);
-        setStatsYear(firstId);
+        const sorted = [...yearsRes.data].sort((a, b) =>
+          new Date(b.endDate || b.startDate || 0) - new Date(a.endDate || a.startDate || 0)
+        );
+        const latestId = sorted[0]?.academicYearId || sorted[0]?.id || "";
+        setSelectedYear(latestId);
+        setStatsYear(latestId);
       }
       if (summaryRes.success) setSummary(summaryRes.data);
       const facList =
         Array.isArray(facultiesRes?.data) ? facultiesRes.data :
         Array.isArray(facultiesRes)       ? facultiesRes       : [];
       setFacultyCount(facList.length);
+      setFaculties(facList);
 
       if (allContribRes.success !== false) {
         const all =
@@ -205,15 +211,19 @@ function ManagerContent() {
   const fetchContributions = async () => {
     setContributionsLoading(true);
     try {
-      const res = await listContributions(selectedYear ? { academicYearId: selectedYear } : {});
+      const params = {};
+      if (selectedYear) params.academicYearId = selectedYear;
+      const res = await listContributions(params);
       if (res.success !== false) {
         const all =
           Array.isArray(res.data?.contributions) ? res.data.contributions :
           Array.isArray(res.data?.items)         ? res.data.items         :
           Array.isArray(res.data)                ? res.data               : [];
-        setContributions(all.filter(c =>
+        const selected = all.filter(c =>
+          c.isSelected === true ||
           (c?.status || c?.contributionStatus || c?.statusName || "").toUpperCase() === "SELECTED"
-        ));
+        );
+        setContributions(selected);
       }
     } catch {}
     setContributionsLoading(false);
@@ -239,23 +249,48 @@ function ManagerContent() {
   };
 
   const handleDownload = async () => {
-    if (!selectedYear) return;
+    if (!contributions.length) return;
     setDownloadLoading(true);
     setDownloadError("");
     try {
+      const zip  = new JSZip();
       const token = getAccessToken();
-      const res = await fetch(`${BASE_URL}/contributions/export/${selectedYear}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.message || `Download failed (${res.status})`);
-      }
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
+
+      await Promise.all(contributions.map(async (c) => {
+        const id      = cid(c);
+        const title   = (c.contributionTitle || c.title || id || "contribution")
+                          .replace(/[/\\?%*:|"<>]/g, "-").trim();
+        const faculty = (resolveFacultyName(c) || "unknown").replace(/[/\\?%*:|"<>]/g, "-");
+        const folder  = zip.folder(`${faculty}/${title}`);
+
+        const fetchFile = async (endpoint) => {
+          const res = await fetch(`${BASE_URL}${endpoint}`, {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          if (!res.ok) return null;
+          return res.blob();
+        };
+
+        const [docBlob, imgBlob] = await Promise.all([
+          fetchFile(`/contributions/${id}/file`),
+          fetchFile(`/contributions/${id}/image`),
+        ]);
+
+        if (docBlob && docBlob.size > 0) {
+          const ext = docBlob.type.includes("pdf") ? "pdf" : "docx";
+          folder.file(`${title}.${ext}`, docBlob);
+        }
+        if (imgBlob && imgBlob.size > 0) {
+          const ext = imgBlob.type.split("/")[1] || "png";
+          folder.file(`${title}_image.${ext}`, imgBlob);
+        }
+      }));
+
+      const content = await zip.generateAsync({ type: "blob" });
+      const url = URL.createObjectURL(content);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `selected-contributions.zip`;
+      a.download = `selected-contributions-${selectedYear}.zip`;
       document.body.appendChild(a); a.click(); a.remove();
       URL.revokeObjectURL(url);
     } catch (err) {
@@ -333,14 +368,23 @@ function ManagerContent() {
     ],
   };
 
-  /* Unique faculties from selected contributions (for filter dropdown) */
-  const faculties = [...new Set(
-    contributions.map((c) => c.facultyName || c.faculty?.facultyName || "").filter(Boolean)
-  )].sort();
+  const resolveFacultyId = (c) =>
+    c.facultyId || c.faculty?.facultyId || c.student?.user?.facultyId || null;
+
+  const resolveFacultyName = (c) =>
+    c.facultyName || c.faculty?.facultyName || c.student?.user?.faculty?.facultyName || null;
 
   const filteredContributions = facultyFilter
-    ? contributions.filter((c) => (c.facultyName || c.faculty?.facultyName || "") === facultyFilter)
+    ? contributions.filter((c) => resolveFacultyId(c) === facultyFilter || resolveFacultyName(c) === facultyFilter)
     : contributions;
+
+  /* selected counts derived from contributions state (statistics API doesn't return this) */
+  const totalSelectedCount = contributions.length;
+  const selectedByFaculty = contributions.reduce((acc, c) => {
+    const fid = resolveFacultyId(c) || resolveFacultyName(c) || "__unknown";
+    acc[fid] = (acc[fid] || 0) + 1;
+    return acc;
+  }, {});
 
   /* derived */
   const grandTotal     = statistics.reduce((s, f) => s + (f.totalContributions || 0), 0) || 1;
@@ -419,7 +463,9 @@ function ManagerContent() {
                       style={{ border: "1.5px solid var(--border)", borderRadius: 7, padding: "7px 12px", fontFamily: "inherit", fontSize: 13 }}
                     >
                       <option value="">All Faculties</option>
-                      {faculties.map((f) => <option key={f} value={f}>{f}</option>)}
+                      {faculties.map((f) => (
+                        <option key={f.facultyId} value={f.facultyId}>{f.facultyName}</option>
+                      ))}
                     </select>
                   </div>
                 </div>
@@ -429,7 +475,7 @@ function ManagerContent() {
                   <div className="cb">
                     <div className="alert info" style={{ margin: 0 }}>
                       <span className="alert-icon">📂</span>
-                      <div>{facultyFilter ? `No selected contributions for ${facultyFilter}.` : "No selected contributions found for this academic year."}</div>
+                      <div>{facultyFilter ? `No selected contributions for ${faculties.find(f => f.facultyId === facultyFilter)?.facultyName || facultyFilter}.` : "No selected contributions found for this academic year."}</div>
                     </div>
                   </div>
                 ) : (
@@ -453,7 +499,7 @@ function ManagerContent() {
                           </div>
                           <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 3, display: "flex", flexWrap: "wrap", gap: "0 8px" }}>
                             <span>👤 {resolveStudent(c) || "—"}</span>
-                            <span>🏫 {c.facultyName || c.faculty?.facultyName || "—"}</span>
+                            <span>🏫 {resolveFacultyName(c) || "—"}</span>
                             <span>📅 {fmtDate(c.submittedAt || c.createdAt)}</span>
                           </div>
                         </div>
@@ -508,7 +554,7 @@ function ManagerContent() {
                             <div className="meta-box">
                               <div className="meta-key">Faculty</div>
                               <div className="meta-val">
-                                {(detailData || selectedContrib)?.facultyName || (detailData || selectedContrib)?.faculty?.facultyName || "—"}
+                                {resolveFacultyName(detailData || selectedContrib) || "—"}
                               </div>
                             </div>
                             <div className="meta-box">
@@ -636,11 +682,11 @@ function ManagerContent() {
                   <div className="stat-l">Total Contributions</div>
                 </div>
                 <div className="stat">
-                  <div className="stat-n">{statsLoading ? "…" : (statsSummary?.totalContributors ?? "—")}</div>
+                  <div className="stat-n">{statsLoading ? "…" : ((statsSummary?.totalContributors ?? statistics.reduce((s, f) => s + (f.totalContributors || 0), 0)) || "—")}</div>
                   <div className="stat-l">Total Contributors</div>
                 </div>
                 <div className="stat green">
-                  <div className="stat-n">{statsLoading ? "…" : (statsSummary?.totalSelected ?? (statistics.reduce((s, f) => s + (f.totalSelected || 0), 0) || "—"))}</div>
+                  <div className="stat-n">{contributionsLoading ? "…" : totalSelectedCount}</div>
                   <div className="stat-l">Selected</div>
                 </div>
                 <div className="stat">
@@ -701,47 +747,57 @@ function ManagerContent() {
                     </div>
 
                     {/* Table */}
-                    <div style={{ overflowX: "auto", WebkitOverflowScrolling: "touch" }}>
-                    <table className="data-table" style={{ marginTop: 4 }}>
-                      <thead>
-                        <tr>
-                          <th>Faculty</th>
-                          <th style={{ textAlign: "right" }}>Contributions</th>
-                          <th style={{ textAlign: "right" }}>% of Total</th>
-                          <th style={{ textAlign: "right" }}>Contributors</th>
-                          <th style={{ textAlign: "right" }}>Selected</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {statistics.map((f, i) => {
-                          const count = f.totalContributions || 0;
-                          const pct   = ((count / grandTotal) * 100).toFixed(1);
-                          return (
-                            <tr key={f.facultyId || i}>
-                              <td><strong>{f.facultyName || "—"}</strong></td>
-                              <td style={{ textAlign: "right" }}>{count}</td>
-                              <td style={{ textAlign: "right" }}>
-                                <span className="badge b-blue" style={{ fontSize: 11 }}>{pct}%</span>
-                              </td>
-                              <td style={{ textAlign: "right" }}><strong>{f.totalContributors ?? "—"}</strong></td>
-                              <td style={{ textAlign: "right" }}>
-                                {f.totalSelected > 0
-                                  ? <span className="badge b-green" style={{ fontSize: 11 }}>{f.totalSelected}</span>
-                                  : <span style={{ color: "var(--text-muted)" }}>—</span>}
-                              </td>
-                            </tr>
-                          );
-                        })}
-                        <tr style={{ background: "var(--sky)", fontWeight: 700 }}>
-                          <td>Total</td>
-                          <td style={{ textAlign: "right" }}>{statistics.reduce((s, f) => s + (f.totalContributions || 0), 0)}</td>
-                          <td style={{ textAlign: "right" }}>100%</td>
-                          <td style={{ textAlign: "right" }}>{statsSummary?.totalContributors ?? "—"}</td>
-                          <td style={{ textAlign: "right" }}>{statsSummary?.totalSelected ?? statistics.reduce((s, f) => s + (f.totalSelected || 0), 0)}</td>
-                        </tr>
-                      </tbody>
-                    </table>
-                    </div>
+                    {(() => {
+                      const hasSelected = totalSelectedCount > 0;
+                      return (
+                      <div style={{ overflowX: "auto", WebkitOverflowScrolling: "touch" }}>
+                      <table className="data-table" style={{ marginTop: 4 }}>
+                        <thead>
+                          <tr>
+                            <th>Faculty</th>
+                            <th style={{ textAlign: "right" }}>Contributions</th>
+                            <th style={{ textAlign: "right" }}>% of Total</th>
+                            <th style={{ textAlign: "right" }}>Contributors</th>
+                            {hasSelected && <th style={{ textAlign: "right" }}>Selected</th>}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {statistics.map((f, i) => {
+                            const count = f.totalContributions || 0;
+                            const pct   = ((count / grandTotal) * 100).toFixed(1);
+                            return (
+                              <tr key={f.facultyId || i}>
+                                <td><strong>{f.facultyName || "—"}</strong></td>
+                                <td style={{ textAlign: "right" }}>{count}</td>
+                                <td style={{ textAlign: "right" }}>
+                                  <span className="badge b-blue" style={{ fontSize: 11 }}>{pct}%</span>
+                                </td>
+                                <td style={{ textAlign: "right" }}><strong>{f.totalContributors ?? "—"}</strong></td>
+                                {hasSelected && (
+                                  <td style={{ textAlign: "right" }}>
+                                    {(() => {
+                                      const cnt = selectedByFaculty[f.facultyId] || selectedByFaculty[f.facultyName] || 0;
+                                      return cnt > 0
+                                        ? <span className="badge b-green" style={{ fontSize: 11 }}>{cnt}</span>
+                                        : <span style={{ color: "var(--text-muted)" }}>0</span>;
+                                    })()}
+                                  </td>
+                                )}
+                              </tr>
+                            );
+                          })}
+                          <tr style={{ background: "var(--sky)", fontWeight: 700 }}>
+                            <td>Total</td>
+                            <td style={{ textAlign: "right" }}>{statistics.reduce((s, f) => s + (f.totalContributions || 0), 0)}</td>
+                            <td style={{ textAlign: "right" }}>100%</td>
+                            <td style={{ textAlign: "right" }}>{(statsSummary?.totalContributors ?? statistics.reduce((s, f) => s + (f.totalContributors || 0), 0)) || "—"}</td>
+                            {hasSelected && <td style={{ textAlign: "right" }}>{totalSelectedCount}</td>}
+                          </tr>
+                        </tbody>
+                      </table>
+                      </div>
+                      );
+                    })()}
                   </>
                 )}
               </div>

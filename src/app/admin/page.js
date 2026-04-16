@@ -92,7 +92,7 @@ function parseStatistics(data) {
 function ayLabel(ay) {
   const s = ay.startDate ? new Date(ay.startDate).getFullYear() : null;
   const e = ay.endDate   ? new Date(ay.endDate).getFullYear()   : null;
-  if (s && e && s !== e) return `${s} / ${e}`;
+  if (s && e && s !== e) return `${s}-${e}`;
   if (s) return String(s);
   return ay.academicYearName || ay.name || ay.academicYearId?.slice(0, 8) || "Academic Year";
 }
@@ -100,8 +100,9 @@ function ayLabel(ay) {
 function downloadCSV(rows, filename) {
   const csv = rows
     .map((r) => r.map((v) => `"${String(v ?? "").replace(/"/g, '""')}"`).join(","))
-    .join("\n");
-  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    .join("\r\n");
+  // Prepend UTF-8 BOM so Excel opens the file correctly on Windows
+  const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8;" });
   const url  = URL.createObjectURL(blob);
   const a    = document.createElement("a");
   a.href = url; a.download = filename;
@@ -218,8 +219,10 @@ export default function AdminPage() {
   const [currentBrowser,  setCurrentBrowser]  = useState("");
 
   /* Loading flags */
-  const [loadingStats,      setLoadingStats]      = useState(true);
-  const [loadingExceptions, setLoadingExceptions] = useState(true);
+  const [loadingStats,        setLoadingStats]        = useState(true);
+  const [loadingExceptions,   setLoadingExceptions]   = useState(true);
+  const [exportingMissing,    setExportingMissing]    = useState(false);
+  const [exportingOverdue,    setExportingOverdue]    = useState(false);
 
   useEffect(() => {
     if (!getAccessToken()) { router.push("/admin/login"); return; }
@@ -242,6 +245,22 @@ export default function AdminPage() {
     if (Array.isArray(data?.list))           return data.list;
     if (Array.isArray(data?.result))         return data.result;
     if (Array.isArray(data?.data))           return data.data;
+    return [];
+  };
+
+  /* Unwrap contributions from a reports response.
+     Handles both single-level { data: [...] } and double-wrapped
+     { data: [{ success, data: [...] }] } shapes. */
+  const extractContributions = (res) => {
+    const d = res?.data;
+    if (!d) return [];
+    // Double-wrapped: data is an array of API response objects
+    if (Array.isArray(d) && d.length > 0 && typeof d[0]?.success === "boolean") {
+      return d.flatMap((r) => Array.isArray(r?.data) ? r.data : []);
+    }
+    if (Array.isArray(d))            return d;
+    if (Array.isArray(d?.data))      return d.data;
+    if (Array.isArray(d?.items))     return d.items;
     return [];
   };
 
@@ -294,8 +313,8 @@ export default function AdminPage() {
         setSummary(statsSummary);
       }
 
-      setMissingComments(missingRes.success ? toArray(missingRes.data) : []);
-      setOverdueComments(overdueRes.success ? toArray(overdueRes.data) : []);
+      setMissingComments(missingRes.success ? extractContributions(missingRes) : []);
+      setOverdueComments(overdueRes.success ? extractContributions(overdueRes) : []);
     } finally {
       setLoadingStats(false);
       setLoadingExceptions(false);
@@ -378,42 +397,74 @@ export default function AdminPage() {
     );
   };
 
-  const exportMissingCSV = () =>
-    downloadCSV(
-      [
-        ["Contribution Title", "Student", "Faculty", "Submitted Date"],
-        ...missingComments.map((c) => {
-          const d = c.createdAt || c.submittedAt;
-          return [
-            c.contributionTitle || c.title || "—",
-            c.studentName || c.user?.username || c.student?.username || "—",
-            c.facultyName || c.user?.faculty?.facultyName || c.faculty?.facultyName || "—",
-            d ? new Date(d).toLocaleDateString("en-GB") : "—",
-          ];
-        }),
-      ],
-      `missing-comments-${new Date().toISOString().split("T")[0]}.csv`,
-    );
+  const pickItems = (res) => {
+    const d = res?.data;
+    if (Array.isArray(d))               return d;
+    if (Array.isArray(d?.items))        return d.items;
+    if (Array.isArray(d?.data))         return d.data;
+    if (Array.isArray(d?.contributions)) return d.contributions;
+    return [];
+  };
 
-  const exportOverdueCSV = () => {
-    const now = Date.now();
-    downloadCSV(
-      [
-        ["Contribution Title", "Student", "Faculty", "Submitted Date", "Days Since Submission"],
-        ...overdueComments.map((c) => {
-          const d    = c.createdAt || c.submittedAt;
-          const days = d ? Math.floor((now - new Date(d).getTime()) / 86400000) : "—";
-          return [
-            c.contributionTitle || c.title || "—",
-            c.studentName || c.user?.username || c.student?.username || "—",
-            c.facultyName || c.user?.faculty?.facultyName || c.faculty?.facultyName || "—",
-            d ? new Date(d).toLocaleDateString("en-GB") : "—",
-            days,
-          ];
-        }),
-      ],
-      `overdue-comments-${new Date().toISOString().split("T")[0]}.csv`,
-    );
+  const exportMissingCSV = async () => {
+    setExportingMissing(true);
+    try {
+      const res = await getMissingComments();
+      console.log("[Export Missing] raw res:", res);
+      const items = pickItems(res);
+      console.log("[Export Missing] items count:", items.length, "| first:", items[0]);
+      if (items.length === 0) {
+        alert("No data returned from server.\n\nResponse: " + JSON.stringify(res?.data));
+        return;
+      }
+      const rows = items.map((c) => [
+        c.contributionTitle,
+        c.student?.user?.username,
+        c.student?.user?.faculty?.facultyName,
+        c.submittedAt ? new Date(c.submittedAt).toLocaleDateString("en-GB") : "",
+      ]);
+      downloadCSV(
+        [["Contribution Title", "Student", "Faculty", "Submitted Date"], ...rows],
+        `missing-comments-${new Date().toISOString().split("T")[0]}.csv`,
+      );
+    } catch (err) {
+      alert("Export failed: " + (err.message || "Unknown error"));
+    } finally {
+      setExportingMissing(false);
+    }
+  };
+
+  const exportOverdueCSV = async () => {
+    setExportingOverdue(true);
+    try {
+      const res = await getOverdueComments();
+      console.log("[Export Overdue] raw res:", res);
+      const items = pickItems(res);
+      console.log("[Export Overdue] items count:", items.length, "| first:", items[0]);
+      if (items.length === 0) {
+        alert("No data returned from server.\n\nResponse: " + JSON.stringify(res?.data));
+        return;
+      }
+      const now = Date.now();
+      const rows = items.map((c) => {
+        const days = c.submittedAt ? Math.floor((now - new Date(c.submittedAt).getTime()) / 86400000) : "";
+        return [
+          c.contributionTitle,
+          c.student?.user?.username,
+          c.student?.user?.faculty?.facultyName,
+          c.submittedAt ? new Date(c.submittedAt).toLocaleDateString("en-GB") : "",
+          days,
+        ];
+      });
+      downloadCSV(
+        [["Contribution Title", "Student", "Faculty", "Submitted Date", "Days Since Submission"], ...rows],
+        `overdue-comments-${new Date().toISOString().split("T")[0]}.csv`,
+      );
+    } catch (err) {
+      alert("Export failed: " + (err.message || "Unknown error"));
+    } finally {
+      setExportingOverdue(false);
+    }
   };
 
   /* ── Derived totals (field names confirmed from API docs) ──
@@ -505,18 +556,8 @@ export default function AdminPage() {
                 <div className="ch">
                   <div>
                     <div className="ch-title">Summary</div>
-                    <div className="ch-sub">Data filtered by academic year</div>
+                    <div className="ch-sub">{yearLabel}</div>
                   </div>
-                  <select
-                    value={selectedYearId}
-                    onChange={(e) => handleYearChange(e.target.value)}
-                    style={{ fontSize: 13, padding: "5px 10px", border: "1.5px solid var(--border)", borderRadius: 6, color: "var(--text)", background: "#fff", fontFamily: "inherit" }}
-                  >
-                    <option value="">All Academic Years</option>
-                    {academicYears.map((y) => (
-                      <option key={y.academicYearId} value={y.academicYearId}>{ayLabel(y)}</option>
-                    ))}
-                  </select>
                 </div>
                 <div className="cb" style={{ paddingTop: 0 }}>
                   <div className="stats" style={{ marginBottom: 0 }}>
@@ -556,9 +597,9 @@ export default function AdminPage() {
                   <button
                     className="btn btn-outline btn-sm"
                     onClick={exportStatisticsCSV}
-                    disabled={statistics.length === 0}
+                    disabled={statistics.length === 0 || loadingStats}
                   >
-                    Export CSV
+                    {loadingStats ? "Loading…" : "Export CSV"}
                   </button>
                 </div>
 
@@ -662,8 +703,8 @@ export default function AdminPage() {
                             {missingComments.length} pending
                           </span>
                         )}
-                        <button className="btn btn-outline btn-sm" onClick={exportMissingCSV} disabled={missingComments.length === 0}>
-                          Export CSV
+                        <button className="btn btn-outline btn-sm" onClick={exportMissingCSV} disabled={exportingMissing}>
+                          {exportingMissing ? "Exporting…" : "Export CSV"}
                         </button>
                       </div>
                     </div>
@@ -683,8 +724,8 @@ export default function AdminPage() {
                             {overdueComments.length} overdue
                           </span>
                         )}
-                        <button className="btn btn-outline btn-sm" onClick={exportOverdueCSV} disabled={overdueComments.length === 0}>
-                          Export CSV
+                        <button className="btn btn-outline btn-sm" onClick={exportOverdueCSV} disabled={exportingOverdue}>
+                          {exportingOverdue ? "Exporting…" : "Export CSV"}
                         </button>
                       </div>
                     </div>
