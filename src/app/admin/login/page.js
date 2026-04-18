@@ -15,6 +15,8 @@ export default function AdminLoginPage() {
   const [agreed, setAgreed] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [showTCModal, setShowTCModal] = useState(false);
+  const [showSupportModal, setShowSupportModal] = useState(false);
 
   const handleLogin = async () => {
     setError("");
@@ -122,8 +124,11 @@ export default function AdminLoginPage() {
             disabled={loading}
           />
           <label htmlFor="tc1">
-            I agree to the <a href="#">Terms &amp; Conditions</a> for
-            participating in the University Magazine submission process.
+            I agree to the{" "}
+            <a href="#" onClick={(e) => { e.preventDefault(); setShowTCModal(true); }}>
+              Terms &amp; Conditions
+            </a>{" "}
+            for participating in the University Magazine submission process.
           </label>
         </div>
 
@@ -145,11 +150,57 @@ export default function AdminLoginPage() {
 
         <div style={{ marginTop: 20, textAlign: "center", fontSize: 13.5, color: "var(--text-muted)" }}>
           Having trouble?{" "}
-          <a href="#" style={{ color: "var(--blue)", textDecoration: "none", fontWeight: 600 }}>
+          <a
+            href="#"
+            style={{ color: "var(--blue)", textDecoration: "none", fontWeight: 600 }}
+            onClick={(e) => { e.preventDefault(); setShowSupportModal(true); }}
+          >
             Contact Support
           </a>
         </div>
       </div>
+
+      {/* Terms & Conditions Modal */}
+      {showTCModal && (
+        <div
+          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}
+          onClick={() => setShowTCModal(false)}
+        >
+          <div
+            style={{ background: "#fff", borderRadius: 12, padding: 32, maxWidth: 480, width: "100%", boxShadow: "0 8px 32px rgba(0,0,0,0.18)" }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 style={{ marginTop: 0, marginBottom: 16, fontSize: 18, fontWeight: 700 }}>Terms &amp; Conditions</h3>
+            <p style={{ fontSize: 14, lineHeight: 1.7, color: "#444", margin: 0 }}>
+              By using the UniVoice Magazine Portal, you agree to submit only original work and grant the University a non-exclusive right to publish your contributions in the annual magazine. Submissions must comply with academic integrity policies. The University reserves the right to edit or reject any content deemed inappropriate or in violation of these terms.
+            </p>
+            <div style={{ marginTop: 24, textAlign: "right" }}>
+              <button className="btn btn-primary" onClick={() => setShowTCModal(false)}>Close</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Contact Support Modal */}
+      {showSupportModal && (
+        <div
+          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}
+          onClick={() => setShowSupportModal(false)}
+        >
+          <div
+            style={{ background: "#fff", borderRadius: 12, padding: 32, maxWidth: 480, width: "100%", boxShadow: "0 8px 32px rgba(0,0,0,0.18)" }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 style={{ marginTop: 0, marginBottom: 16, fontSize: 18, fontWeight: 700 }}>Contact Support</h3>
+            <p style={{ fontSize: 14, lineHeight: 1.7, color: "#444", margin: 0 }}>
+              For login issues or technical difficulties, please contact the University IT Helpdesk at <strong>support@university.ac.uk</strong> or call <strong>+1 (800) 123-4567</strong> during office hours (Mon–Fri, 9 AM – 5 PM). For urgent matters, visit the IT Support desk on campus.
+            </p>
+            <div style={{ marginTop: 24, textAlign: "right" }}>
+              <button className="btn btn-primary" onClick={() => setShowSupportModal(false)}>Close</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

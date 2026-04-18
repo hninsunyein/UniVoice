@@ -482,17 +482,20 @@ export default function CoordinatorPage() {
   const getSubmitDate = (c) => c.createdAt || c.submittedAt || c.submitted_at || c.created_at || null;
 
   /* ── counts derived entirely from filtered ── */
-  const total           = filtered.length;
-  const notReviewedList = filtered.filter(isNotReviewed);
-  const reviewedList    = filtered.filter(isReviewed);
-  const pendingTabCount = notReviewedList.length;
+  const total            = filtered.length;
+  const notReviewedList  = filtered.filter(isNotReviewed);
+  const reviewedList     = filtered.filter(isReviewed);
+  const overdueList      = filtered.filter((c) => isNotReviewed(c) && daysAgo(getSubmitDate(c)) > 14);
+  const pendingTabCount  = notReviewedList.length;
   const reviewedTabCount = reviewedList.length;
-  const selCount        = filtered.filter(isContribSelected).length;
-  const overdue         = filtered.filter((c) => getStatus(c) === "SUBMITTED" && daysAgo(getSubmitDate(c)) > 14).length;
+  const overdueTabCount  = overdueList.length;
+  const selCount         = filtered.filter(isContribSelected).length;
+  const overdue          = overdueList.length;
 
   const tabFiltered =
     activeTab === "reviewed" ? reviewedList :
     activeTab === "pending"  ? notReviewedList :
+    activeTab === "overdue"  ? overdueList :
     filtered;
 
   const parsedFinal = finalClosureDate ? new Date(finalClosureDate.replace(" ", "T").replace(/\+00$/, "Z").replace(/\+00:00$/, "Z")) : null;
@@ -688,52 +691,48 @@ export default function CoordinatorPage() {
             </div>
           )}
 
-          {/* Stats */}
-          <div className="stats-5">
-            <div className="stat">
-              <div className="stat-n">{loading ? "…" : totalAll}</div>
-              <div className="stat-l">Total</div>
-            </div>
-            <div className="stat orange">
-              <div className="stat-n">{loading ? "…" : statBase.filter(isNotReviewed).length}</div>
-              <div className="stat-l">Not Yet Reviewed</div>
-            </div>
-            <div className="stat green">
-              <div className="stat-n">{loading ? "…" : statBase.filter(isReviewed).length}</div>
-              <div className="stat-l">Reviewed</div>
-            </div>
-            <div className="stat green">
-              <div className="stat-n">{loading ? "…" : selectedAll}</div>
-              <div className="stat-l">Selected</div>
-            </div>
-            <div className="stat red">
-              <div className="stat-n">{overdueCount === null ? "…" : overdueCount}</div>
-              <div className="stat-l">Overdue Comments</div>
-            </div>
-          </div>
+          {/* Stats + Overdue alert — hidden in detail view */}
+          {!showDetail && (
+            <>
+              <div className="stats-5">
+                <div className="stat">
+                  <div className="stat-n">{loading ? "…" : totalAll}</div>
+                  <div className="stat-l">Total</div>
+                </div>
+                <div className="stat orange">
+                  <div className="stat-n">{loading ? "…" : statBase.filter(isNotReviewed).length}</div>
+                  <div className="stat-l">Not Yet Reviewed</div>
+                </div>
+                <div className="stat green">
+                  <div className="stat-n">{loading ? "…" : statBase.filter(isReviewed).length}</div>
+                  <div className="stat-l">Reviewed</div>
+                </div>
+                <div className="stat green">
+                  <div className="stat-n">{loading ? "…" : selectedAll}</div>
+                  <div className="stat-l">Selected</div>
+                </div>
+                <div className="stat red">
+                  <div className="stat-n">{overdueCount === null ? "…" : overdueCount}</div>
+                  <div className="stat-l">Overdue Comments</div>
+                </div>
+              </div>
 
-          {/* Overdue Comments Card */}
-          {overdueCount > 0 && (
-            <div className="card" style={{ marginBottom: 16, borderLeft: "4px solid #b91c1c" }}>
-              <div className="cb" style={{ display: "flex", alignItems: "center", gap: 16, padding: "16px 20px" }}>
-                <div style={{ fontSize: 32 }}>⏰</div>
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontWeight: 700, fontSize: 15, color: "#b91c1c", marginBottom: 2 }}>
-                    {overdueCount} Overdue Comment{overdueCount !== 1 ? "s" : ""}
-                  </div>
-                  <div style={{ fontSize: 13, color: "var(--text-muted)" }}>
-                    {overdueCount === 1 ? "1 student contribution has" : `${overdueCount} student contributions have`} been waiting more than 14 days without a coordinator comment.
+              {overdueCount > 0 && (
+                <div className="card" style={{ marginBottom: 16, borderLeft: "4px solid #b91c1c" }}>
+                  <div className="cb" style={{ display: "flex", alignItems: "center", gap: 16, padding: "16px 20px" }}>
+                    <div style={{ fontSize: 32 }}>⏰</div>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontWeight: 700, fontSize: 15, color: "#b91c1c", marginBottom: 2 }}>
+                        {overdueCount} Overdue Comment{overdueCount !== 1 ? "s" : ""}
+                      </div>
+                      <div style={{ fontSize: 13, color: "var(--text-muted)" }}>
+                        {overdueCount === 1 ? "1 student contribution has" : `${overdueCount} student contributions have`} been waiting more than 14 days without a coordinator comment.
+                      </div>
+                    </div>
                   </div>
                 </div>
-                <button
-                  className="btn btn-outline btn-sm"
-                  style={{ color: "#b91c1c", borderColor: "#b91c1c", whiteSpace: "nowrap" }}
-                  onClick={() => { setStatusFilter("SUBMITTED"); setActiveTab("pending"); }}
-                >
-                  View Overdue
-                </button>
-              </div>
-            </div>
+              )}
+            </>
           )}
 
           {/* Alerts */}
@@ -795,9 +794,10 @@ export default function CoordinatorPage() {
                 {/* Tabs */}
                 <div style={{ display: "flex", borderBottom: "1px solid var(--border)", padding: "0 8px", background: "var(--sky)" }}>
                   {[
-                    { key: "all",      label: "All",              count: total,          badgeCls: "b-draft" },
-                    { key: "pending",  label: "Not Yet Reviewed", count: pendingTabCount, badgeCls: "b-blue" },
+                    { key: "all",      label: "All",              count: total,           badgeCls: "b-draft" },
+                    { key: "pending",  label: "Not Yet Reviewed", count: pendingTabCount,  badgeCls: "b-blue" },
                     { key: "reviewed", label: "Reviewed",         count: reviewedTabCount, badgeCls: "b-green" },
+                    { key: "overdue",  label: "Overdue",          count: overdueTabCount,  badgeCls: "b-red" },
                   ].map((tab) => (
                     <button
                       key={tab.key}
@@ -843,7 +843,9 @@ export default function CoordinatorPage() {
                             ? "No contributions submitted yet."
                             : activeTab === "pending"
                               ? "No pending contributions."
-                              : "No reviewed contributions yet."}
+                              : activeTab === "overdue"
+                                ? "No overdue contributions. All submissions have been commented on within 14 days."
+                                : "No reviewed contributions yet."}
                       </div>
                     </div>
                   </div>
