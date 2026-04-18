@@ -66,7 +66,15 @@ export const login = async (email, password, facultyId) => {
 
   setTokens(accessToken, refreshToken);
   setUser(user);
-  if (typeof window !== "undefined") localStorage.setItem("loginAt", new Date().toISOString());
+  if (typeof window !== "undefined") {
+    const key = user?.email || email;
+    // Fall back to legacy non-keyed loginAt for first post-migration login
+    const prev = localStorage.getItem(`loginAt_${key}`) || localStorage.getItem("loginAt");
+    if (prev) localStorage.setItem(`lastLoginAt_${key}`, prev);
+    else localStorage.removeItem(`lastLoginAt_${key}`);
+    localStorage.setItem(`loginAt_${key}`, new Date().toISOString());
+    localStorage.setItem("activeUserEmail", key);
+  }
 
   const path = resolveRole(user?.roleName) || resolveRole(user?.role) || "/admin";
   if (process.env.NODE_ENV !== "production") {
@@ -94,7 +102,15 @@ export const firstLoginChangePassword = async (email, currentPassword, newPasswo
   const { accessToken, refreshToken, user } = data.data;
   setTokens(accessToken, refreshToken);
   setUser(user);
-  if (typeof window !== "undefined") localStorage.setItem("loginAt", new Date().toISOString());
+  if (typeof window !== "undefined") {
+    const key = user?.email || email;
+    // Fall back to legacy non-keyed loginAt for first post-migration login
+    const prev = localStorage.getItem(`loginAt_${key}`) || localStorage.getItem("loginAt");
+    if (prev) localStorage.setItem(`lastLoginAt_${key}`, prev);
+    else localStorage.removeItem(`lastLoginAt_${key}`);
+    localStorage.setItem(`loginAt_${key}`, new Date().toISOString());
+    localStorage.setItem("activeUserEmail", key);
+  }
 
   const path = resolveRole(user?.roleName) || resolveRole(user?.role) || "/user/student";
   return { path, user };

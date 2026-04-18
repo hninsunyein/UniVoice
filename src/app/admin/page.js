@@ -11,7 +11,7 @@ import {
 import { listAcademicYears } from "@/lib/services/closures";
 import { listFaculties } from "@/lib/services/faculties";
 import { listContributions } from "@/lib/services/contributions";
-import { getUser, getAccessToken } from "@/lib/api";
+import { getUser, getAccessToken, getLastLoginAt } from "@/lib/api";
 import { logout } from "@/lib/auth";
 import { useRouter } from "next/navigation";
 
@@ -200,6 +200,7 @@ function ExceptionTable({ items, showDays, emptyMessage }) {
 export default function AdminPage() {
   const router = useRouter();
   const [user,            setUser]           = useState(null);
+  const [lastLoginAt,     setLastLoginAt]    = useState(null);
   const [activeTab,       setActiveTab]      = useState("statistics");
 
   /* Data */
@@ -227,6 +228,7 @@ export default function AdminPage() {
   useEffect(() => {
     if (!getAccessToken()) { router.push("/admin/login"); return; }
     setUser(getUser());
+    setLastLoginAt(getLastLoginAt());
     const browser = detectBrowser();
     setCurrentBrowser(browser);
     const existing = JSON.parse(localStorage.getItem("browserSessions") || "[]");
@@ -523,6 +525,15 @@ export default function AdminPage() {
             <div style={{ display: "flex", gap: 10 }}>
               <button className="btn btn-outline btn-sm" onClick={() => fetchAll(selectedYearId)}>↺ Refresh</button>
             </div>
+          </div>
+
+          <div className="alert info" style={{ marginBottom: 16 }}>
+            <span className="alert-icon">🔵</span>
+            {lastLoginAt ? (
+              <div>Last login: <strong>{new Date(lastLoginAt).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}, {new Date(lastLoginAt).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true })}</strong></div>
+            ) : (
+              <div>Welcome! 🎉 This is your <strong>first time</strong> logging in.</div>
+            )}
           </div>
 
           {/* Tab switcher */}

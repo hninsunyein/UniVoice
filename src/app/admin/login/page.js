@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { login } from "@/lib/auth";
@@ -15,8 +15,21 @@ export default function AdminLoginPage() {
   const [agreed, setAgreed] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
-  const [showTCModal, setShowTCModal] = useState(false);
+  const [showTCModal,      setShowTCModal]      = useState(false);
   const [showSupportModal, setShowSupportModal] = useState(false);
+  const [sessionExpired,   setSessionExpired]   = useState(false);
+  const [expiredLastLogin, setExpiredLastLogin] = useState(null);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (localStorage.getItem("sessionExpired") === "true") {
+      setSessionExpired(true);
+      const activeEmail = localStorage.getItem("activeUserEmail");
+      const ts = activeEmail ? localStorage.getItem(`lastLoginAt_${activeEmail}`) : null;
+      setExpiredLastLogin(ts || null);
+      localStorage.removeItem("sessionExpired");
+    }
+  }, []);
 
   const handleLogin = async () => {
     setError("");
@@ -131,6 +144,22 @@ export default function AdminLoginPage() {
             for participating in the University Magazine submission process.
           </label>
         </div>
+
+        {sessionExpired && (
+          <div className="alert warn" style={{ marginBottom: 16 }}>
+            <span className="alert-icon">⏱️</span>
+            <div>
+              <div style={{ fontWeight: 600, marginBottom: 2 }}>Your session has expired. Please sign in again.</div>
+              {expiredLastLogin && (
+                <div style={{ fontSize: 12.5, color: "var(--text-muted)" }}>
+                  Last login:{" "}
+                  {new Date(expiredLastLogin).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })},{" "}
+                  {new Date(expiredLastLogin).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true })}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
 
         {error && (
           <div className="alert dang" style={{ marginBottom: 16 }}>

@@ -3,7 +3,7 @@ import { useState, useEffect, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Topbar from "@/components/Topbar";
 import Sidebar from "@/components/Sidebar";
-import { getUser, getAccessToken, BASE_URL } from "@/lib/api";
+import { getUser, getAccessToken, BASE_URL, getLastLoginAt } from "@/lib/api";
 import { listContributions, getContribution } from "@/lib/services/contributions";
 import mammoth from "mammoth";
 import JSZip from "jszip";
@@ -117,6 +117,7 @@ function ManagerContent() {
   const activeTab   = searchParams.get("tab") || "selected";
 
   const [user, setUser] = useState(null);
+  const [lastLoginAt, setLastLoginAt] = useState(null);
 
   /* Selected contributions tab */
   const [contributions,       setContributions]       = useState([]);
@@ -152,6 +153,7 @@ function ManagerContent() {
   useEffect(() => {
     if (!getAccessToken()) { router.push("/login"); return; }
     setUser(getUser());
+    setLastLoginAt(getLastLoginAt());
     fetchInit();
   }, []);
 
@@ -406,6 +408,15 @@ function ManagerContent() {
                   <div className="pg-title">Marketing Manager Dashboard</div>
                   <div className="pg-sub">University-wide · Read-only access to all selected contributions</div>
                 </div>
+              </div>
+
+              <div className="alert info" style={{ marginBottom: 16 }}>
+                <span className="alert-icon">🔵</span>
+                {lastLoginAt ? (
+                  <div>Last login: <strong>{new Date(lastLoginAt).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}, {new Date(lastLoginAt).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true })}</strong></div>
+                ) : (
+                  <div>Welcome! 🎉 This is your <strong>first time</strong> logging in.</div>
+                )}
               </div>
 
               <div className="download-cta">

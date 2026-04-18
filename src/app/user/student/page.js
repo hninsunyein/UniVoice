@@ -4,7 +4,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import Topbar from "@/components/Topbar";
 import Sidebar from "@/components/Sidebar";
-import { getUser, getAccessToken, BASE_URL } from "@/lib/api";
+import { getUser, getAccessToken, BASE_URL, getLastLoginAt } from "@/lib/api";
 import { listContributions, getContribution } from "@/lib/services/contributions";
 import { getComments } from "@/lib/services/comments";
 import { listAcademicYears } from "@/lib/services/closures";
@@ -64,7 +64,7 @@ function StudentDashboard() {
   const [comments,      setComments]      = useState([]);
   const [detailLoading, setDetailLoading] = useState(false);
   const [error,         setError]         = useState("");
-  const [loginAt,       setLoginAt]       = useState(null);
+  const [lastLoginAt,   setLastLoginAt]   = useState(null);
 
   const [docBlob,      setDocBlob]      = useState(null);
   const [imgBlob,      setImgBlob]      = useState(null);
@@ -73,7 +73,7 @@ function StudentDashboard() {
   useEffect(() => {
     if (!getAccessToken()) { router.push("/login"); return; }
     setUser(getUser());
-    setLoginAt(localStorage.getItem("loginAt") || null);
+    setLastLoginAt(getLastLoginAt());
     fetchData();
   }, []);
 
@@ -341,13 +341,16 @@ function StudentDashboard() {
             </div>
           </div>
 
-          {/* Last login banner */}
-          {loginAt && (
-            <div className="alert info" style={{ marginBottom: 16 }}>
-              <span className="alert-icon">🔵</span>
-              <div>Last login: <strong>{new Date(loginAt).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })}</strong> at <strong>{new Date(loginAt).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}</strong></div>
-            </div>
-          )}
+
+          {/* Last login / first-time welcome banner */}
+          <div className="alert info" style={{ marginBottom: 16 }}>
+            <span className="alert-icon">🔵</span>
+            {lastLoginAt ? (
+              <div>Last login: <strong>{new Date(lastLoginAt).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}, {new Date(lastLoginAt).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true })}</strong></div>
+            ) : (
+              <div>Welcome! 🎉 This is your <strong>first time</strong> logging in.</div>
+            )}
+          </div>
 
           {error && (
             <div className="alert dang" style={{ marginBottom: 18 }}>

@@ -3,7 +3,7 @@ import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import Topbar from "@/components/Topbar";
 import Sidebar from "@/components/Sidebar";
-import { getUser, getAccessToken, BASE_URL, get } from "@/lib/api";
+import { getUser, getAccessToken, BASE_URL, get, getLastLoginAt } from "@/lib/api";
 import { listContributions, getContribution, selectContribution } from "@/lib/services/contributions";
 import { addComment, getComments } from "@/lib/services/comments";
 import { listFaculties } from "@/lib/services/faculties";
@@ -195,7 +195,7 @@ export default function CoordinatorPage() {
   const [commentLoading, setCommentLoading] = useState(false);
   const [error,          setError]          = useState("");
   const [success,        setSuccess]        = useState("");
-  const [loginAt,        setLoginAt]        = useState(null);
+  const [lastLoginAt,    setLastLoginAt]    = useState(null);
 
   /* blob URLs for the currently-open contribution's files */
   const [docBlob,      setDocBlob]      = useState(null); // { blobUrl, mimeType } | null
@@ -215,7 +215,7 @@ export default function CoordinatorPage() {
     if (!getAccessToken()) { router.push("/login"); return; }
     const u = getUser();
     setUser(u);
-    setLoginAt(localStorage.getItem("loginAt") || null);
+    setLastLoginAt(getLastLoginAt());
     fetchLookups();
     fetchContributions();
     fetchGuestLogins();
@@ -683,13 +683,16 @@ export default function CoordinatorPage() {
             </button>
           </div>
 
-          {/* Last login banner */}
-          {loginAt && (
-            <div className="alert info" style={{ marginBottom: 16 }}>
-              <span className="alert-icon">🔵</span>
-              <div>Last login: <strong>{new Date(loginAt).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })}</strong> at <strong>{new Date(loginAt).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}</strong></div>
-            </div>
-          )}
+
+          {/* Last login / first-time welcome banner */}
+          <div className="alert info" style={{ marginBottom: 16 }}>
+            <span className="alert-icon">🔵</span>
+            {lastLoginAt ? (
+              <div>Last login: <strong>{new Date(lastLoginAt).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}, {new Date(lastLoginAt).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true })}</strong></div>
+            ) : (
+              <div>Welcome! 🎉 This is your <strong>first time</strong> logging in.</div>
+            )}
+          </div>
 
           {/* Stats + Overdue alert — hidden in detail view */}
           {!showDetail && (

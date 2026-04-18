@@ -54,6 +54,18 @@ export default function GuestPage() {
     init(u);
   }, []);
 
+  /* Handle browser back button when in detail view */
+  useEffect(() => {
+    const handlePop = () => {
+      if (selected) {
+        setSelected(null);
+        setDocBlob(null);
+      }
+    };
+    window.addEventListener("popstate", handlePop);
+    return () => window.removeEventListener("popstate", handlePop);
+  }, [selected]);
+
   const init = async (u) => {
     const [facs, yearId] = await Promise.all([
       loadFaculties(),
@@ -210,10 +222,16 @@ export default function GuestPage() {
   };
 
   const openArticle = (c) => {
+    window.history.pushState({ detail: true }, "");
     setSelected(c);
     setDocBlob(null);
     const id = c?.contributionId || c?.id || c?._id;
     if (id) fetchDocBlob(id);
+  };
+
+  const closeDetail = () => {
+    setSelected(null);
+    setDocBlob(null);
   };
 
   const avatarInfo = user
@@ -257,7 +275,7 @@ export default function GuestPage() {
             {/* Breadcrumb */}
             <div style={{ marginBottom: 20, display: "flex", gap: 20, alignItems: "center" }}>
               <button
-                onClick={() => setSelected(null)}
+                onClick={closeDetail}
                 style={{ background: "none", border: "none", cursor: "pointer", color: "var(--blue)", fontFamily: "inherit", fontSize: 14, fontWeight: 600, padding: 0 }}
               >
                 ← Back to Articles

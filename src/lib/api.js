@@ -27,7 +27,8 @@ export const clearTokens = () => {
   localStorage.removeItem("accessToken");
   localStorage.removeItem("refreshToken");
   localStorage.removeItem("user");
-  localStorage.removeItem("loginAt");
+  // loginAt is intentionally kept — on next login it gets promoted to lastLoginAt
+  // lastLoginAt is intentionally kept — used on login page (session expired) and dashboards
 };
 
 export const setUser = (user) =>
@@ -40,6 +41,19 @@ export const getUser = () => {
   } catch {
     return null;
   }
+};
+
+/* Returns the previous login timestamp for the currently active user.
+   Keyed by email so different users on the same device get their own history. */
+export const getLastLoginAt = () => {
+  if (typeof window === "undefined") return null;
+  const email = localStorage.getItem("activeUserEmail");
+  if (email) {
+    const perEmail = localStorage.getItem(`lastLoginAt_${email}`);
+    if (perEmail) return perEmail;
+  }
+  // Fallback to legacy non-keyed key (for users migrating from old storage format)
+  return localStorage.getItem("lastLoginAt") || null;
 };
 
 /* ─── Token refresh ─── */
@@ -128,6 +142,7 @@ export const apiRequest = async (path, options = {}) => {
       refreshSubscribers = [];
       clearTokens();
       if (typeof window !== "undefined") {
+        localStorage.setItem("sessionExpired", "true");
         const isAdmin = window.location.pathname.startsWith("/admin");
         window.location.href = isAdmin ? "/admin/login" : "/login";
       }

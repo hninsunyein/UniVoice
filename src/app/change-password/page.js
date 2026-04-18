@@ -201,6 +201,7 @@ function ChangePasswordForm() {
             <Link href="/login" style={{ color: "var(--blue)", textDecoration: "none" }}>← Back to Login</Link>
           </div>
         )}
+
       </div>
     </div>
   );
