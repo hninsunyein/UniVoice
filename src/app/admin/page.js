@@ -12,6 +12,7 @@ import { listAcademicYears } from "@/lib/services/closures";
 import { listFaculties } from "@/lib/services/faculties";
 import { listContributions } from "@/lib/services/contributions";
 import { getUser, getAccessToken, getLastLoginAt } from "@/lib/api";
+import { useSessionGuard } from "@/lib/useSessionGuard";
 import { logout } from "@/lib/auth";
 import { useRouter } from "next/navigation";
 
@@ -199,6 +200,7 @@ function ExceptionTable({ items, showDays, emptyMessage }) {
 
 export default function AdminPage() {
   const router = useRouter();
+  useSessionGuard("/admin/login");
   const [user,            setUser]           = useState(null);
   const [lastLoginAt,     setLastLoginAt]    = useState(null);
   const [activeTab,       setActiveTab]      = useState("statistics");

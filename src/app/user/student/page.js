@@ -5,6 +5,7 @@ import Link from "next/link";
 import Topbar from "@/components/Topbar";
 import Sidebar from "@/components/Sidebar";
 import { getUser, getAccessToken, BASE_URL, getLastLoginAt } from "@/lib/api";
+import { useSessionGuard } from "@/lib/useSessionGuard";
 import { listContributions, getContribution } from "@/lib/services/contributions";
 import { getComments } from "@/lib/services/comments";
 import { listAcademicYears } from "@/lib/services/closures";
@@ -52,6 +53,7 @@ const cid = (c) => c?.contributionId || c?.id || c?._id;
 
 function StudentDashboard() {
   const router      = useRouter();
+  useSessionGuard();
   const searchParams = useSearchParams();
   const activeTab   = searchParams.get("tab") || "dashboard";
   const [user, setUser]                             = useState(null);

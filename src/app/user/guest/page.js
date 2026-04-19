@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import Topbar from "@/components/Topbar";
 import Sidebar from "@/components/Sidebar";
 import { getUser, getAccessToken, BASE_URL } from "@/lib/api";
+import { useSessionGuard } from "@/lib/useSessionGuard";
 import { listContributions } from "@/lib/services/contributions";
 import { listFaculties } from "@/lib/services/faculties";
 import { listAcademicYears } from "@/lib/services/closures";
@@ -31,6 +32,7 @@ const bgPool = [
 
 export default function GuestPage() {
   const router = useRouter();
+  useSessionGuard();
   const [user, setUser] = useState(null);
 
   const [contributions,     setContributions]     = useState([]);

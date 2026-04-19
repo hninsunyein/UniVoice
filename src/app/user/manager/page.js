@@ -4,6 +4,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import Topbar from "@/components/Topbar";
 import Sidebar from "@/components/Sidebar";
 import { getUser, getAccessToken, BASE_URL, getLastLoginAt } from "@/lib/api";
+import { useSessionGuard } from "@/lib/useSessionGuard";
 import { listContributions, getContribution } from "@/lib/services/contributions";
 import mammoth from "mammoth";
 import JSZip from "jszip";
@@ -113,6 +114,7 @@ async function fetchBlobUrl(endpoint) {
 
 function ManagerContent() {
   const router      = useRouter();
+  useSessionGuard();
   const searchParams = useSearchParams();
   const activeTab   = searchParams.get("tab") || "selected";
 

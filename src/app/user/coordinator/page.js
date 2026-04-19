@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import Topbar from "@/components/Topbar";
 import Sidebar from "@/components/Sidebar";
 import { getUser, getAccessToken, BASE_URL, get, getLastLoginAt } from "@/lib/api";
+import { useSessionGuard } from "@/lib/useSessionGuard";
 import { listContributions, getContribution, selectContribution } from "@/lib/services/contributions";
 import { addComment, getComments } from "@/lib/services/comments";
 import { listFaculties } from "@/lib/services/faculties";
@@ -168,6 +169,7 @@ async function viewDocument(blob, fileName) {
 
 export default function CoordinatorPage() {
   const router = useRouter();
+  useSessionGuard();
   const [user, setUser] = useState(null);
 
   const [activePage,       setActivePage]       = useState("contributions"); // "contributions" | "guests"
