@@ -399,6 +399,16 @@ export default function MagazineFacultyPage() {
           </p>
         </div>
 
+        <div className="alert info" style={{ marginBottom: 24 }}>
+          <span className="alert-icon">👁</span>
+          <div>
+            <strong>You are viewing as a Guest.</strong>{" "}
+            Browse selected contributions for <strong>{facultyName}</strong>
+            {yearLabel ? <> · Academic Year <strong>{yearLabel}</strong></> : ""}.{" "}
+            Click any article to read more. View only — no editing or downloads.
+          </div>
+        </div>
+
         {loading ? (
           <div style={{ textAlign: "center", padding: "60px 0", color: "#6b7a99" }}>
             Loading contributions…

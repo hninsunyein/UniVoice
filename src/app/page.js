@@ -1,7 +1,7 @@
 "use client";
 import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
-import { login } from "@/lib/auth";
+import { useRouter } from "next/navigation";
 import { listFaculties } from "@/lib/services/faculties";
 import { listAcademicYears } from "@/lib/services/closures";
 
@@ -41,14 +41,9 @@ const bgPool = [
 ];
 
 export default function LandingPage() {
-  const [faculties,        setFaculties]        = useState([]);
-  const [yearLabel,        setYearLabel]        = useState("2025/26");
-  const [showModal,        setShowModal]        = useState(false);
-  const [guestEmail,       setGuestEmail]       = useState("");
-  const [guestFacultyId,   setGuestFacultyId]   = useState("");
-  const [guestLoading,     setGuestLoading]     = useState(false);
-  const [modalError,       setModalError]       = useState("");
-  const [pendingFacultyId, setPendingFacultyId] = useState(null);
+  const router = useRouter();
+  const [faculties,  setFaculties]  = useState([]);
+  const [yearLabel,  setYearLabel]  = useState("2025/26");
   const magRef = useRef(null);
 
   useEffect(() => {
@@ -77,50 +72,10 @@ export default function LandingPage() {
     listFaculties()
       .then((res) => {
         const facs = Array.isArray(res) ? res : (Array.isArray(res?.data) ? res.data : []);
-        if (facs.length > 0) {
-          setFaculties(facs);
-          setGuestFacultyId(facs[0].facultyId);
-        }
+        if (facs.length > 0) setFaculties(facs);
       })
       .catch(() => {});
   }, []);
-
-  const openModal = () => {
-    setModalError("");
-    setGuestEmail("");
-    setPendingFacultyId(null);
-    if (faculties.length > 0) setGuestFacultyId(faculties[0].facultyId);
-    setShowModal(true);
-  };
-
-  const openModalForFaculty = (facultyId) => {
-    setModalError("");
-    setGuestEmail("");
-    setPendingFacultyId(facultyId);
-    setGuestFacultyId(facultyId);
-    setShowModal(true);
-  };
-
-  /* Guest login — email + faculty only, no password */
-  const handleGuestLogin = async () => {
-    if (!guestEmail.trim()) { setModalError("Please enter your email address."); return; }
-    if (!guestFacultyId)    { setModalError("Please select a faculty."); return; }
-    setGuestLoading(true);
-    setModalError("");
-    try {
-      const result = await login(guestEmail.trim(), undefined, guestFacultyId);
-      if (result.requiresPasswordChange) {
-        window.location.href = `/change-password?firstLogin=true&email=${encodeURIComponent(result.email)}`;
-        return;
-      }
-      window.location.href = pendingFacultyId
-        ? `/magazine/${pendingFacultyId}`
-        : result.path;
-    } catch (err) {
-      setModalError(err.message || "Login failed. Please check your details.");
-      setGuestLoading(false);
-    }
-  };
 
   return (
     <div className="landing-page">
@@ -129,7 +84,6 @@ export default function LandingPage() {
       <div className="lp-header">
         <div className="lp-logo">Uni<span>Voice</span></div>
         <div className="lp-header-right">
-          <button className="lp-guest-btn" onClick={openModal}>👁 Guest Access</button>
           <Link href="/login" className="lp-login-btn" style={{ textDecoration: "none" }}>Sign In</Link>
         </div>
       </div>
@@ -205,7 +159,7 @@ export default function LandingPage() {
               <div
                 key={faculty.facultyId}
                 className="lp-mag-card"
-                onClick={() => openModalForFaculty(faculty.facultyId)}
+                onClick={() => router.push(`/magazine/${faculty.facultyId}`)}
                 style={{ cursor: "pointer" }}
               >
                 <div className="lp-mag-cover" style={{ background: bgPool[i % bgPool.length] }}>
@@ -220,7 +174,7 @@ export default function LandingPage() {
                   </div>
                   <button
                     className="lp-read-btn"
-                    onClick={(e) => { e.stopPropagation(); openModalForFaculty(faculty.facultyId); }}
+                    onClick={(e) => { e.stopPropagation(); router.push(`/magazine/${faculty.facultyId}`); }}
                   >
                     Read More →
                   </button>
@@ -236,74 +190,6 @@ export default function LandingPage() {
         <p>© 2026 University Magazine Portal · UniVoice</p>
       </div>
 
-      {/* ── GUEST ACCESS MODAL — email + faculty only, no password ── */}
-      {showModal && (
-        <div
-          className="lp-modal-overlay"
-          onClick={(e) => { if (e.target === e.currentTarget) setShowModal(false); }}
-        >
-          <div className="lp-demo-card">
-            <button className="lp-modal-close" onClick={() => setShowModal(false)}>✕</button>
-
-            <div className="lp-demo-icon-circle">👁</div>
-            <h2 className="lp-demo-title">Guest Access</h2>
-            <p className="lp-demo-subtitle">
-              {pendingFacultyId
-                ? `Sign in as a guest to read ${faculties.find((f) => f.facultyId === pendingFacultyId)?.facultyName || "this faculty"}'s articles`
-                : "Enter your email and select a faculty to continue"}
-            </p>
-
-            <div className="lp-demo-field">
-              <label>Email Address</label>
-              <input
-                type="email"
-                value={guestEmail}
-                onChange={(e) => setGuestEmail(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && handleGuestLogin()}
-                placeholder="guest@university.ac.uk"
-                autoFocus
-                disabled={guestLoading}
-                style={{ width: "100%", border: "1.5px solid var(--lp-line)", borderRadius: 8, padding: "11px 14px", fontFamily: "'DM Sans', sans-serif", fontSize: 14, color: "var(--lp-text)", background: "#fff", outline: "none" }}
-              />
-            </div>
-
-            <div className="lp-demo-field">
-              <label>Faculty</label>
-              <select
-                value={guestFacultyId}
-                onChange={(e) => setGuestFacultyId(e.target.value)}
-                disabled={guestLoading || faculties.length === 0}
-              >
-                {faculties.length === 0
-                  ? <option value="">Loading…</option>
-                  : faculties.map((f) => (
-                      <option key={f.facultyId} value={f.facultyId}>{f.facultyName}</option>
-                    ))
-                }
-              </select>
-            </div>
-
-            {modalError && (
-              <div style={{ background: "#fdeaea", border: "1px solid #f0b8b8", borderRadius: 8, padding: "10px 14px", marginBottom: 14, fontSize: 13, color: "#b52a2a", display: "flex", gap: 8, alignItems: "center", textAlign: "left" }}>
-                <span>⚠️</span><span>{modalError}</span>
-              </div>
-            )}
-
-            <button
-              className="lp-demo-login-btn"
-              onClick={handleGuestLogin}
-              disabled={guestLoading || !guestEmail.trim() || !guestFacultyId}
-              style={{ opacity: guestLoading || !guestEmail.trim() || !guestFacultyId ? 0.6 : 1 }}
-            >
-              {guestLoading ? "Signing in…" : "Continue →"}
-            </button>
-
-            <div className="lp-demo-footer">
-              Staff or student? <Link href="/login" onClick={() => setShowModal(false)}>Sign in here</Link>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
