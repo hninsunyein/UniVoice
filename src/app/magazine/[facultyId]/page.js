@@ -8,16 +8,41 @@ import { listFaculties } from "@/lib/services/faculties";
 import { listAcademicYears } from "@/lib/services/closures";
 import mammoth from "mammoth";
 
-const emojiPool = ["🤖", "🌿", "🔬", "☀️", "🚀", "💧", "🎨", "📚", "💡", "🌍", "🏆", "🔭"];
+const facultyEmojiMap = [
+  { keys: ["engineering", "mechanical", "civil", "electrical", "structural"], emoji: "🏗️" },
+  { keys: ["computing", "computer", "software", "it ", "information technology", "data"], emoji: "💻" },
+  { keys: ["medicine", "medical", "health", "nursing", "pharmacy", "clinical"], emoji: "🏥" },
+  { keys: ["science", "biology", "chemistry", "physics", "natural"], emoji: "🔬" },
+  { keys: ["art", "design", "creative", "fine art", "media", "film", "music"], emoji: "🎨" },
+  { keys: ["business", "management", "finance", "accounting", "economics", "commerce"], emoji: "💼" },
+  { keys: ["law", "legal", "justice"], emoji: "⚖️" },
+  { keys: ["education", "teaching", "pedagogy"], emoji: "📚" },
+  { keys: ["environment", "ecology", "sustainability", "agriculture"], emoji: "🌿" },
+  { keys: ["architecture", "urban", "planning", "construction"], emoji: "🏛️" },
+  { keys: ["psychology", "sociology", "social", "humanities", "philosophy"], emoji: "🧠" },
+  { keys: ["language", "linguistic", "literature", "english", "communication"], emoji: "📝" },
+  { keys: ["sport", "physical", "exercise", "kinesiology"], emoji: "🏅" },
+  { keys: ["tourism", "hospitality", "hotel"], emoji: "✈️" },
+];
+
+function getFacultyEmoji(name, fallbackIndex) {
+  const lower = (name || "").toLowerCase();
+  const match = facultyEmojiMap.find((m) => m.keys.some((k) => lower.includes(k)));
+  if (match) return match.emoji;
+  const fallback = ["🤖", "🔬", "🎨", "💼", "📚", "🏗️", "🌿", "☀️"];
+  return fallback[fallbackIndex % fallback.length];
+}
+
+const emojiPool = ["🤖", "🔬", "🎨", "💼", "📚", "🏗️", "🌿", "☀️"];
 const bgPool = [
-  "linear-gradient(135deg, #c8ddf8, #a0c4f0)",
-  "linear-gradient(135deg, #c8e8d8, #a0d0b8)",
-  "linear-gradient(135deg, #e8d8f8, #d0b8f0)",
-  "linear-gradient(135deg, #f8e8c8, #f0d0a0)",
-  "linear-gradient(135deg, #f8c8c8, #f0a0a0)",
-  "linear-gradient(135deg, #c8f0f8, #a0e0f0)",
-  "linear-gradient(135deg, #d8f8c8, #b8e0a0)",
-  "linear-gradient(135deg, #f8d8e8, #f0b8d0)",
+  "linear-gradient(135deg,#c8ddf8,#a0c4f0)",
+  "linear-gradient(135deg,#c8e8d8,#a0d0b8)",
+  "linear-gradient(135deg,#e8d8f8,#d0b8f0)",
+  "linear-gradient(135deg,#f8e8c8,#f0d0a0)",
+  "linear-gradient(135deg,#f8c8c8,#f0a0a0)",
+  "linear-gradient(135deg,#c8f0f8,#a0e0f0)",
+  "linear-gradient(135deg,#d8f0c8,#b8e0a0)",
+  "linear-gradient(135deg,#f0d8f8,#e0b8f0)",
 ];
 
 function fmtDate(dateStr) {
@@ -37,15 +62,18 @@ export default function MagazineFacultyPage() {
   const router = useRouter();
 
   const [faculty,       setFaculty]       = useState(null);
+  const [facultyIndex,  setFacultyIndex]  = useState(0);
   const [contributions, setContributions] = useState([]);
   const [loading,       setLoading]       = useState(true);
   const [selected,      setSelected]      = useState(null);
   const [activeYearId,  setActiveYearId]  = useState("");
+  const [yearLabel,     setYearLabel]     = useState("");
 
   /* document view */
   const [docBlob,    setDocBlob]    = useState(null);
   const [docLoading, setDocLoading] = useState(false);
   const [docViewing, setDocViewing] = useState(false);
+  const [docAuthErr, setDocAuthErr] = useState(false);
 
   useEffect(() => {
     if (!facultyId) return;
@@ -70,7 +98,9 @@ export default function MagazineFacultyPage() {
     try {
       const data = await listFaculties();
       const facs = Array.isArray(data) ? data : (data?.data ?? []);
-      const found = facs.find((f) => f.facultyId === facultyId);
+      const idx = facs.findIndex((f) => f.facultyId === facultyId);
+      if (idx >= 0) setFacultyIndex(idx);
+      const found = facs[idx >= 0 ? idx : 0];
       if (found) setFaculty(found);
     } catch {}
   };
@@ -83,8 +113,12 @@ export default function MagazineFacultyPage() {
       const sorted = [...years].sort((a, b) =>
         new Date(b.endDate || b.startDate || 0) - new Date(a.endDate || a.startDate || 0)
       );
-      const id = sorted[0].academicYearId || sorted[0].id || "";
+      const ay = sorted[0];
+      const id = ay.academicYearId || ay.id || "";
       setActiveYearId(id);
+      const s = ay.startDate ? new Date(ay.startDate).getFullYear() : null;
+      const e = ay.endDate   ? new Date(ay.endDate).getFullYear()   : null;
+      setYearLabel(s && e && s !== e ? `${s}/${String(e).slice(-2)}` : s ? String(s) : ay.academicYearName || "");
       return id;
     } catch {
       return "";
@@ -128,12 +162,14 @@ export default function MagazineFacultyPage() {
     }
   };
 
-  /* Same document fetch logic as guest page */
   const fetchDocBlob = async (id) => {
     setDocBlob(null);
+    setDocAuthErr(false);
     setDocLoading(true);
     try {
       let token = getAccessToken();
+      if (!token) { setDocAuthErr(true); setDocLoading(false); return; }
+
       let res = await fetch(`${BASE_URL}/contributions/${id}/file`, {
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -150,8 +186,10 @@ export default function MagazineFacultyPage() {
             res = await fetch(`${BASE_URL}/contributions/${id}/file`, {
               headers: { Authorization: `Bearer ${token}` },
             });
+          } else {
+            setDocAuthErr(true); setDocLoading(false); return;
           }
-        } catch {}
+        } catch { setDocAuthErr(true); setDocLoading(false); return; }
       }
       if (res.ok) {
         const blob = await res.blob();
@@ -195,7 +233,10 @@ export default function MagazineFacultyPage() {
 </html>`;
       const htmlBlob = new Blob([html], { type: "text/html" });
       window.open(URL.createObjectURL(htmlBlob), "_blank");
-    } catch {}
+    } catch {
+      /* Mammoth failed (e.g. PDF or unsupported format) — open raw file directly */
+      window.open(URL.createObjectURL(docBlob), "_blank");
+    }
     setDocViewing(false);
   };
 
@@ -216,9 +257,8 @@ export default function MagazineFacultyPage() {
 
   /* ── Article detail view ── */
   if (selected) {
-    const idx = contributions.indexOf(selected);
-    const bg  = bgPool[idx >= 0 ? idx % bgPool.length : 0];
-    const em  = emojiPool[idx >= 0 ? idx % emojiPool.length : 0];
+    const bg = bgPool[facultyIndex % bgPool.length];
+    const em = getFacultyEmoji(facultyName, facultyIndex);
 
     return (
       <div className="landing-page" style={{ minHeight: "100vh", background: "#f5f7fa" }}>
@@ -309,6 +349,10 @@ export default function MagazineFacultyPage() {
                     >
                       👁 {docViewing ? "Opening…" : "View Document"}
                     </button>
+                  ) : docAuthErr ? (
+                    <Link href="/login" className="btn btn-primary btn-sm" style={{ textDecoration: "none" }}>
+                      Sign in to view
+                    </Link>
                   ) : (
                     <span style={{ fontSize: 12, color: "var(--text-muted)" }}>Not available</span>
                   )}
@@ -351,7 +395,7 @@ export default function MagazineFacultyPage() {
             {facultyName}
           </h1>
           <p style={{ color: "#6b7a99", fontSize: 14 }}>
-            Selected articles for publication · Academic Year 2025/26
+            Selected articles for publication{yearLabel ? ` · Academic Year ${yearLabel}` : ""}
           </p>
         </div>
 
@@ -384,11 +428,11 @@ export default function MagazineFacultyPage() {
                 <div
                   className="gallery-thumb"
                   style={{ height: 130, position: "relative", overflow: "hidden",
-                    background: c.image?.imageUrl ? "transparent" : bgPool[i % bgPool.length] }}
+                    background: c.image?.imageUrl ? "transparent" : bgPool[facultyIndex % bgPool.length] }}
                 >
                   {c.image?.imageUrl
                     ? <img src={c.image.imageUrl} alt={c.contributionTitle} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-                    : emojiPool[i % emojiPool.length]}
+                    : getFacultyEmoji(facultyName, facultyIndex)}
                   <span style={{
                     position: "absolute", top: 8, right: 8,
                     background: "rgba(255,255,255,.92)", padding: "3px 9px",

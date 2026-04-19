@@ -8,6 +8,7 @@ import { getUser, getAccessToken, BASE_URL, getLastLoginAt } from "@/lib/api";
 import { listContributions, getContribution } from "@/lib/services/contributions";
 import { getComments } from "@/lib/services/comments";
 import { listAcademicYears } from "@/lib/services/closures";
+import mammoth from "mammoth";
 
 function parseDate(str) {
   if (!str) return null;
@@ -69,6 +70,7 @@ function StudentDashboard() {
   const [docBlob,      setDocBlob]      = useState(null);
   const [imgBlob,      setImgBlob]      = useState(null);
   const [filesLoading, setFilesLoading] = useState(false);
+  const [docViewing,   setDocViewing]   = useState(false);
 
   useEffect(() => {
     if (!getAccessToken()) { router.push("/login"); return; }
@@ -103,7 +105,19 @@ function StudentDashboard() {
 
       if (yearsRes.success !== false) {
         const years = Array.isArray(yearsRes.data) ? yearsRes.data : [];
-        const activeYear = years.find((y) => y.closureDate?.isActive) || years[years.length - 1];
+        /* Only consider years the admin has activated */
+        const activeYears = years.filter((y) => y.closureDate?.isActive === true);
+        const sorted = [...activeYears].sort((a, b) =>
+          new Date(b.endDate || b.startDate || 0) - new Date(a.endDate || a.startDate || 0)
+        );
+        /* Pick the year whose date range contains today, else the most recent active year */
+        const nowMs = Date.now();
+        const activeYear =
+          sorted.find((y) => {
+            const start = y.startDate ? new Date(y.startDate).getTime() : 0;
+            const end   = y.endDate   ? new Date(y.endDate).getTime()   : Infinity;
+            return nowMs >= start && nowMs <= end;
+          }) || sorted[0];
         if (activeYear?.closureDate) {
           setInitialClosureDate(activeYear.closureDate.initialClosureDate || null);
           setFinalClosureDate(activeYear.closureDate.finalClosureDate   || null);
@@ -155,6 +169,20 @@ function StudentDashboard() {
     setDocBlob(doc || null);
     setImgBlob(img || null);
     setFilesLoading(false);
+  };
+
+  const viewDocument = async (blob, blobUrl, title) => {
+    setDocViewing(true);
+    try {
+      const arrayBuffer = await blob.arrayBuffer();
+      const result = await mammoth.convertToHtml({ arrayBuffer });
+      const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${title}</title><style>body{font-family:Calibri,Arial,sans-serif;max-width:860px;margin:0 auto;padding:0 24px 40px;line-height:1.7;color:#222}h1,h2,h3,h4{margin-top:1.2em}p{margin:.6em 0}img{max-width:100%}.toolbar{position:sticky;top:0;background:#f0f4fa;border-bottom:1px solid #ccd6e8;padding:10px 0;margin:0 -24px 24px;display:flex;align-items:center;gap:12px;padding-left:24px;z-index:10}.toolbar button{background:#1a4a8a;color:#fff;border:none;border-radius:6px;padding:6px 16px;font-size:13px;cursor:pointer;font-family:inherit}.toolbar .doc-name{font-size:13px;font-weight:600;color:#1a4a8a;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}</style></head><body><div class="toolbar"><button onclick="window.close()">← Close Tab</button><span class="doc-name">📄 ${title}</span><button onclick="window.print()">🖨 Print</button></div>${result.value}</body></html>`;
+      const htmlBlob = new Blob([html], { type: "text/html" });
+      window.open(URL.createObjectURL(htmlBlob), "_blank");
+    } catch {
+      window.open(blobUrl, "_blank");
+    }
+    setDocViewing(false);
   };
 
   const openDetail = async (contrib) => {
@@ -587,14 +615,27 @@ function StudentDashboard() {
                                 </div>
                               </div>
                               {docBlob && (
-                                <a
-                                  href={docBlob.blobUrl}
-                                  download={displayDetail?.originalFileName || displayDetail?.fileName || "document.docx"}
-                                  className="btn btn-outline btn-sm"
-                                  style={{ textDecoration: "none" }}
-                                >
-                                  ⬇ Download
-                                </a>
+                                <div style={{ display: "flex", gap: 6 }}>
+                                  <button
+                                    className="btn btn-outline btn-sm"
+                                    onClick={() => viewDocument(
+                                      docBlob.blob,
+                                      docBlob.blobUrl,
+                                      displayDetail?.originalFileName || displayDetail?.fileName || "Document"
+                                    )}
+                                    disabled={docViewing}
+                                  >
+                                    👁 {docViewing ? "Opening…" : "View"}
+                                  </button>
+                                  <a
+                                    href={docBlob.blobUrl}
+                                    download={displayDetail?.originalFileName || displayDetail?.fileName || "document.docx"}
+                                    className="btn btn-navy btn-sm"
+                                    style={{ textDecoration: "none" }}
+                                  >
+                                    ⬇ Download
+                                  </a>
+                                </div>
                               )}
                             </div>
                             {/* Image */}

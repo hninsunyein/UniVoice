@@ -3,8 +3,32 @@ import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import { login } from "@/lib/auth";
 import { listFaculties } from "@/lib/services/faculties";
+import { listAcademicYears } from "@/lib/services/closures";
 
-const emojiPool = ["🤖", "🔬", "🎨", "💼", "📚", "🏗️", "🌿", "☀️"];
+const facultyEmojiMap = [
+  { keys: ["engineering", "mechanical", "civil", "electrical", "structural"], emoji: "🏗️" },
+  { keys: ["computing", "computer", "software", "it ", "information technology", "data"], emoji: "💻" },
+  { keys: ["medicine", "medical", "health", "nursing", "pharmacy", "clinical"], emoji: "🏥" },
+  { keys: ["science", "biology", "chemistry", "physics", "natural"], emoji: "🔬" },
+  { keys: ["art", "design", "creative", "fine art", "media", "film", "music"], emoji: "🎨" },
+  { keys: ["business", "management", "finance", "accounting", "economics", "commerce"], emoji: "💼" },
+  { keys: ["law", "legal", "justice"], emoji: "⚖️" },
+  { keys: ["education", "teaching", "pedagogy"], emoji: "📚" },
+  { keys: ["environment", "ecology", "sustainability", "agriculture"], emoji: "🌿" },
+  { keys: ["architecture", "urban", "planning", "construction"], emoji: "🏛️" },
+  { keys: ["psychology", "sociology", "social", "humanities", "philosophy"], emoji: "🧠" },
+  { keys: ["language", "linguistic", "literature", "english", "communication"], emoji: "📝" },
+  { keys: ["sport", "physical", "exercise", "kinesiology"], emoji: "🏅" },
+  { keys: ["tourism", "hospitality", "hotel"], emoji: "✈️" },
+];
+
+function getFacultyEmoji(name, fallbackIndex) {
+  const lower = (name || "").toLowerCase();
+  const match = facultyEmojiMap.find((m) => m.keys.some((k) => lower.includes(k)));
+  if (match) return match.emoji;
+  const fallback = ["🤖", "🔬", "🎨", "💼", "📚", "🏗️", "🌿", "☀️"];
+  return fallback[fallbackIndex % fallback.length];
+}
 const bgPool = [
   "linear-gradient(135deg,#c8ddf8,#a0c4f0)",
   "linear-gradient(135deg,#c8e8d8,#a0d0b8)",
@@ -18,6 +42,7 @@ const bgPool = [
 
 export default function LandingPage() {
   const [faculties,        setFaculties]        = useState([]);
+  const [yearLabel,        setYearLabel]        = useState("2025/26");
   const [showModal,        setShowModal]        = useState(false);
   const [guestEmail,       setGuestEmail]       = useState("");
   const [guestFacultyId,   setGuestFacultyId]   = useState("");
@@ -27,6 +52,28 @@ export default function LandingPage() {
   const magRef = useRef(null);
 
   useEffect(() => {
+    listAcademicYears()
+      .then((res) => {
+        const years = Array.isArray(res?.data) ? res.data : (Array.isArray(res) ? res : []);
+        if (years.length > 0) {
+          const sorted = [...years].sort((a, b) =>
+            new Date(b.endDate || b.startDate || 0) - new Date(a.endDate || a.startDate || 0)
+          );
+          const active =
+            sorted.find((y) => {
+              const s = y.startDate ? new Date(y.startDate).getTime() : 0;
+              const e = y.endDate   ? new Date(y.endDate).getTime()   : Infinity;
+              return Date.now() >= s && Date.now() <= e;
+            }) || sorted[0];
+          if (active) {
+            const s = active.startDate ? new Date(active.startDate).getFullYear() : null;
+            const e = active.endDate   ? new Date(active.endDate).getFullYear()   : null;
+            setYearLabel(s && e && s !== e ? `${s}/${String(e).slice(-2)}` : s ? String(s) : active.academicYearName || "2025/26");
+          }
+        }
+      })
+      .catch(() => {});
+
     listFaculties()
       .then((res) => {
         const facs = Array.isArray(res) ? res : (Array.isArray(res?.data) ? res.data : []);
@@ -111,7 +158,7 @@ export default function LandingPage() {
                 <div style={{ position: "absolute", top: 12, left: 20, width: 160, height: 220, borderRadius: 8, background: "linear-gradient(160deg,#0a2d6a,#1455a8)", boxShadow: "4px 4px 16px rgba(13,61,138,.25)", transform: "rotate(4deg)" }} />
                 <div style={{ position: "absolute", top: 0, left: 0, width: 160, height: 220, borderRadius: 8, background: "linear-gradient(160deg,#0d3d8a 0%,#1a6fc4 55%,#4fa3f7 100%)", boxShadow: "6px 10px 28px rgba(13,61,138,.35)", padding: "18px 14px", display: "flex", flexDirection: "column", overflow: "hidden" }}>
                   <div style={{ position: "absolute", top: -24, right: -24, width: 90, height: 90, borderRadius: "50%", background: "rgba(255,255,255,.07)" }} />
-                  <div style={{ fontSize: 9, color: "rgba(255,255,255,.55)", letterSpacing: 2, textTransform: "uppercase", marginBottom: 6 }}>Annual Edition · 2025/26</div>
+                  <div style={{ fontSize: 9, color: "rgba(255,255,255,.55)", letterSpacing: 2, textTransform: "uppercase", marginBottom: 6 }}>Annual Edition · {yearLabel}</div>
                   <div style={{ fontFamily: "'Libre Baskerville', serif", fontSize: 24, color: "#fff", lineHeight: 1.15, marginBottom: 4 }}>Uni<span style={{ color: "#a8d0ff" }}>Voice</span></div>
                   <div style={{ width: 36, height: 2, background: "#4fa3f7", borderRadius: 2, marginBottom: 14 }} />
                   <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
@@ -162,12 +209,12 @@ export default function LandingPage() {
                 style={{ cursor: "pointer" }}
               >
                 <div className="lp-mag-cover" style={{ background: bgPool[i % bgPool.length] }}>
-                  <span className="lp-mag-year">2025/26</span>
-                  {emojiPool[i % emojiPool.length]}
+                  <span className="lp-mag-year">{yearLabel}</span>
+                  {getFacultyEmoji(faculty.facultyName, i)}
                 </div>
                 <div className="lp-mag-info">
                   <div className="lp-mag-title">{faculty.facultyName}</div>
-                  <div className="lp-mag-meta">Selected articles · Academic Year 2025/26</div>
+                  <div className="lp-mag-meta">Selected articles · Academic Year {yearLabel}</div>
                   <div className="lp-mag-desc">
                     Student-authored articles selected by the faculty coordinator for the university&apos;s annual magazine.
                   </div>

@@ -30,7 +30,8 @@ export default function Sidebar({ profile, sections }) {
           <div key={si}>
             <div className="sidebar-sec">{section.title}</div>
             {section.items.map((item, ii) => {
-              const cls = `sitem ${pathname === item.href ? "active" : ""} ${item.active ? "active" : ""}`;
+              const isActive = item.active !== undefined ? item.active : pathname === item.href;
+              const cls = `sitem ${isActive ? "active" : ""}`;
               const badge = item.badge && (
                 <span className={`sbadge ${item.badgeColor || ""}`}>{item.badge}</span>
               );

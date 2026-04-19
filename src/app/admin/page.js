@@ -210,10 +210,14 @@ export default function AdminPage() {
   const [statistics,      setStatistics]     = useState([]);   // normalised faculty rows
   const [missingComments, setMissingComments]= useState([]);
   const [overdueComments, setOverdueComments]= useState([]);
-  const [facultyCount,     setFacultyCount]    = useState(null); // from /faculties
-  const [statsContributors, setStatsContributors] = useState(null); // top-level from /reports/statistics
-  const [statsSelected,    setStatsSelected]  = useState(null); // top-level from /reports/statistics
+  const [facultyCount,     setFacultyCount]    = useState(null);
+  const [statsContributors, setStatsContributors] = useState(null);
+  const [statsSelected,    setStatsSelected]  = useState(null);
   const [selectedCount,    setSelectedCount]  = useState(null);
+
+  /* Faculty filter for bar chart */
+  const [facultyFilter,    setFacultyFilter]   = useState("");
+  const [selectedByFaculty,setSelectedByFaculty] = useState({});
 
   /* Browser tracking */
   const [browserSessions, setBrowserSessions] = useState([]);
@@ -341,9 +345,15 @@ export default function AdminPage() {
         const selectedItems = items.filter((c) =>
           (c.status || c.contributionStatus || c.statusName || "").toUpperCase() === "SELECTED"
         );
-        console.log("[Admin] All contributions:", items.length, "| Selected:", selectedItems.length);
-        console.log("[Admin] Selected titles:", selectedItems.map((c) => c.contributionTitle || c.title || "(no title)"));
         setSelectedCount(selectedItems.length);
+        const byFac = {};
+        selectedItems.forEach((c) => {
+          const fid = c.facultyId || c.faculty?.facultyId || c.student?.user?.facultyId;
+          const fname = c.facultyName || c.faculty?.facultyName || c.student?.user?.faculty?.facultyName;
+          const key = fid || fname || "__unknown";
+          byFac[key] = (byFac[key] || 0) + 1;
+        });
+        setSelectedByFaculty(byFac);
       }
     } catch {}
   };
@@ -598,35 +608,62 @@ export default function AdminPage() {
 
               {/* Contributions by Faculty */}
               <div className="card" style={{ marginBottom: 20 }}>
-                <div className="ch">
-                  <div>
+                <div className="ch" style={{ flexWrap: "wrap", gap: 8 }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
                     <div className="ch-title">Contributions by Faculty</div>
                     <div className="ch-sub">
                       {yearLabel} · {totalContribAll} contribution{totalContribAll !== 1 ? "s" : ""} · {totalContributors || "?"} contributor{totalContributors !== 1 ? "s" : ""}
                     </div>
                   </div>
-                  <button
-                    className="btn btn-outline btn-sm"
-                    onClick={exportStatisticsCSV}
-                    disabled={statistics.length === 0 || loadingStats}
-                  >
-                    {loadingStats ? "Loading…" : "Export CSV"}
-                  </button>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                    <select
+                      value={selectedYearId}
+                      onChange={(e) => { setFacultyFilter(""); handleYearChange(e.target.value); }}
+                      style={{ border: "1.5px solid var(--border)", borderRadius: 7, padding: "6px 10px", fontFamily: "inherit", fontSize: 13 }}
+                    >
+                      {academicYears.map((y) => (
+                        <option key={y.academicYearId} value={y.academicYearId}>{ayLabel(y)}</option>
+                      ))}
+                    </select>
+                    <select
+                      value={facultyFilter}
+                      onChange={(e) => setFacultyFilter(e.target.value)}
+                      style={{ border: "1.5px solid var(--border)", borderRadius: 7, padding: "6px 10px", fontFamily: "inherit", fontSize: 13 }}
+                    >
+                      <option value="">All Faculties</option>
+                      {statistics.map((f) => (
+                        <option key={f.facultyId || f.facultyName} value={f.facultyId || f.facultyName}>{f.facultyName}</option>
+                      ))}
+                    </select>
+                    <button
+                      className="btn btn-outline btn-sm"
+                      onClick={exportStatisticsCSV}
+                      disabled={statistics.length === 0 || loadingStats}
+                    >
+                      {loadingStats ? "Loading…" : "Export CSV"}
+                    </button>
+                  </div>
                 </div>
 
                 {loadingStats ? (
                   <div className="cb" style={{ textAlign: "center", color: "var(--text-muted)", padding: "32px 0" }}>
                     Loading statistics…
                   </div>
-                ) : statistics.length > 0 ? (
+                ) : statistics.length > 0 ? (() => {
+                  const displayedStats = facultyFilter
+                    ? statistics.filter((f) => f.facultyId === facultyFilter || f.facultyName === facultyFilter)
+                    : statistics;
+                  const displayTotal = displayedStats.reduce((s, f) => s + (f.totalContributions || 0), 0);
+                  const displayMax   = displayedStats.reduce((m, f) => Math.max(m, f.totalContributions || 0), 1);
+                  return (
                   <>
                     {/* Bar chart */}
                     <div className="cb" style={{ paddingBottom: 0 }}>
                       <div className="bar-rows">
-                        {statistics.map((f, i) => {
+                        {displayedStats.map((f, i) => {
                           const count = f.totalContributions || 0;
                           const pct   = ((count / grandTotal) * 100).toFixed(1);
-                          const barW  = Math.round((count / maxContributions) * 100);
+                          const barW  = Math.round((count / displayMax) * 100);
                           return (
                             <div key={f.facultyId || i} className="brow">
                               <div className="blbl">{f.facultyName}</div>
@@ -644,50 +681,108 @@ export default function AdminPage() {
                       </div>
                     </div>
 
-                    {/* Statistics table: Faculty · Contributions · % · Contributors */}
+                    {/* Statistics table */}
                     <div style={{ overflowX: "auto", WebkitOverflowScrolling: "touch" }}>
                     <table className="data-table" style={{ marginTop: 4 }}>
                       <thead>
                         <tr>
                           <th>Faculty</th>
-                          <th style={{ textAlign: "right" }}>Contributions</th>
-                          <th style={{ textAlign: "right" }}>% of Total</th>
-                          <th style={{ textAlign: "right" }}>Contributors</th>
+                          <th style={{ textAlign: "center" }}>Contributions</th>
+                          <th style={{ textAlign: "center" }}>% of Total</th>
+                          <th style={{ textAlign: "center" }}>Contributors</th>
+                          <th style={{ textAlign: "center" }}>Selected</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {statistics.map((f, i) => {
+                        {displayedStats.map((f, i) => {
                           const count = f.totalContributions || 0;
                           const pct   = ((count / grandTotal) * 100).toFixed(1);
+                          const selCnt = selectedByFaculty[f.facultyId] || selectedByFaculty[f.facultyName] || 0;
                           return (
                             <tr key={f.facultyId || i}>
                               <td><strong>{f.facultyName || "—"}</strong></td>
-                              <td style={{ textAlign: "right" }}>{count}</td>
-                              <td style={{ textAlign: "right" }}>
+                              <td style={{ textAlign: "center" }}>{count}</td>
+                              <td style={{ textAlign: "center" }}>
                                 <span className="badge b-blue" style={{ fontSize: 11 }}>{pct}%</span>
                               </td>
-                              <td style={{ textAlign: "right" }}>
-                                <strong>{f.totalContributors ?? "—"}</strong>
+                              <td style={{ textAlign: "center" }}>
+                                {f.totalContributors ?? "—"}
+                              </td>
+                              <td style={{ textAlign: "center" }}>
+                                {selCnt > 0
+                                  ? <span className="badge b-green" style={{ fontSize: 11 }}>{selCnt}</span>
+                                  : <span style={{ color: "var(--text-muted)" }}>0</span>}
                               </td>
                             </tr>
                           );
                         })}
                         <tr style={{ background: "var(--sky)", fontWeight: 700 }}>
                           <td>Total</td>
-                          <td style={{ textAlign: "right" }}>{totalContribAll}</td>
-                          <td style={{ textAlign: "right" }}>100%</td>
-                          <td style={{ textAlign: "right" }}>{totalContributors || "—"}</td>
+                          <td style={{ textAlign: "center" }}>{displayTotal}</td>
+                          <td style={{ textAlign: "center" }}>{facultyFilter ? ((displayTotal / grandTotal) * 100).toFixed(1) + "%" : "100%"}</td>
+                          <td style={{ textAlign: "center" }}>{facultyFilter ? (displayedStats[0]?.totalContributors ?? "—") : (totalContributors ?? "—")}</td>
+                          <td style={{ textAlign: "center" }}>{facultyFilter ? (selectedByFaculty[facultyFilter] || 0) : totalSelectedAll}</td>
                         </tr>
                       </tbody>
                     </table>
                     </div>
                   </>
-                ) : (
+                  );
+                })() : (
                   <div className="cb" style={{ color: "var(--text-muted)", fontSize: 14, textAlign: "center", padding: "24px 0" }}>
                     No statistics available for the selected academic year.
                   </div>
                 )}
               </div>
+
+              {/* Browser Usage */}
+              {browserEntries.length > 0 && (
+                <div className="card" style={{ marginBottom: 20 }}>
+                  <div className="ch">
+                    <div>
+                      <div className="ch-title">Browser Usage</div>
+                      <div className="ch-sub" suppressHydrationWarning>
+                        {browserSessions.length} session{browserSessions.length !== 1 ? "s" : ""} recorded
+                      </div>
+                    </div>
+                  </div>
+                  <div style={{ overflowX: "auto", WebkitOverflowScrolling: "touch" }}>
+                  <table className="data-table">
+                    <thead>
+                      <tr>
+                        <th>Browser</th>
+                        <th style={{ textAlign: "center" }}>Sessions</th>
+                        <th style={{ textAlign: "center" }}>% of Total</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {browserEntries.map(([browser, count]) => {
+                        const pct   = ((count / browserTotal) * 100).toFixed(1);
+                        const color = browserColors[browser] || "#888";
+                        return (
+                          <tr key={browser}>
+                            <td>
+                              <span style={{ display: "inline-block", width: 10, height: 10, borderRadius: 2, background: color, marginRight: 8, verticalAlign: "middle" }} />
+                              {browser}
+                              {browser === currentBrowser && (
+                                <span className="badge b-blue" style={{ fontSize: 10, marginLeft: 8 }}>current</span>
+                              )}
+                            </td>
+                            <td style={{ textAlign: "center" }}>{count}</td>
+                            <td style={{ textAlign: "center" }}>{pct}%</td>
+                          </tr>
+                        );
+                      })}
+                      <tr style={{ background: "var(--sky)", fontWeight: 700 }}>
+                        <td>Total</td>
+                        <td style={{ textAlign: "center" }}>{browserSessions.length}</td>
+                        <td style={{ textAlign: "center" }}>100%</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                  </div>
+                </div>
+              )}
 
             </>
           )}

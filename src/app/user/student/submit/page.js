@@ -60,7 +60,18 @@ function SubmitContributionInner() {
             Array.isArray(raw)                ? raw               : [];
           if (years.length > 0) {
             setAcademicYears(years);
-            const active = years.find((y) => y.closureDate?.isActive) || years[years.length - 1];
+            const activeYears = years.filter((y) => y.closureDate?.isActive === true);
+            const sorted = [...activeYears].sort((a, b) =>
+              new Date(b.endDate || b.startDate || 0) - new Date(a.endDate || a.startDate || 0)
+            );
+            const nowMs = Date.now();
+            const active =
+              sorted.find((y) => {
+                const start = y.startDate ? new Date(y.startDate).getTime() : 0;
+                const end   = y.endDate   ? new Date(y.endDate).getTime()   : Infinity;
+                return nowMs >= start && nowMs <= end;
+              }) || sorted[0];
+            if (!active) return; // no active academic year — leave closure dates unset
             setAcademicYearId(active.academicYearId);
             if (active?.closureDate) {
               setInitialClosureDate(active.closureDate.initialClosureDate || null);

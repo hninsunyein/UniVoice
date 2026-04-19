@@ -208,8 +208,6 @@ export default function CoordinatorPage() {
   const [guestLogins,     setGuestLogins]     = useState([]);
   const [guestLoading,    setGuestLoading]    = useState(false);
 
-  /* overdue comments count from backend */
-  const [overdueCount,    setOverdueCount]    = useState(null);
 
   useEffect(() => {
     if (!getAccessToken()) { router.push("/login"); return; }
@@ -219,7 +217,6 @@ export default function CoordinatorPage() {
     fetchLookups();
     fetchContributions();
     fetchGuestLogins();
-    fetchOverdueCount();
   }, []);
 
 
@@ -266,16 +263,6 @@ export default function CoordinatorPage() {
       }
     } catch {}
     finally { setGuestLoading(false); }
-  };
-
-  const fetchOverdueCount = async () => {
-    try {
-      const res = await getOverdueComments();
-      const items = Array.isArray(res?.data) ? res.data : [];
-      setOverdueCount(items.length);
-    } catch {
-      setOverdueCount(null);
-    }
   };
 
   const isMounted = useRef(false);
@@ -715,21 +702,21 @@ export default function CoordinatorPage() {
                   <div className="stat-l">Selected</div>
                 </div>
                 <div className="stat red">
-                  <div className="stat-n">{overdueCount === null ? "…" : overdueCount}</div>
+                  <div className="stat-n">{loading ? "…" : overdue}</div>
                   <div className="stat-l">Overdue Comments</div>
                 </div>
               </div>
 
-              {overdueCount > 0 && (
+              {overdue > 0 && (
                 <div className="card" style={{ marginBottom: 16, borderLeft: "4px solid #b91c1c" }}>
                   <div className="cb" style={{ display: "flex", alignItems: "center", gap: 16, padding: "16px 20px" }}>
                     <div style={{ fontSize: 32 }}>⏰</div>
                     <div style={{ flex: 1 }}>
                       <div style={{ fontWeight: 700, fontSize: 15, color: "#b91c1c", marginBottom: 2 }}>
-                        {overdueCount} Overdue Comment{overdueCount !== 1 ? "s" : ""}
+                        {overdue} Overdue Comment{overdue !== 1 ? "s" : ""}
                       </div>
                       <div style={{ fontSize: 13, color: "var(--text-muted)" }}>
-                        {overdueCount === 1 ? "1 student contribution has" : `${overdueCount} student contributions have`} been waiting more than 14 days without a coordinator comment.
+                        {overdue === 1 ? "1 student contribution has" : `${overdue} student contributions have`} been waiting more than 14 days without a coordinator comment.
                       </div>
                     </div>
                   </div>

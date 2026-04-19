@@ -7,7 +7,7 @@ import { getUser, getAccessToken, BASE_URL, getLastLoginAt } from "@/lib/api";
 import { listContributions, getContribution } from "@/lib/services/contributions";
 import mammoth from "mammoth";
 import JSZip from "jszip";
-import { getDashboardSummary, getStatistics } from "@/lib/services/reports";
+import { getDashboardSummary } from "@/lib/services/reports";
 import { listAcademicYears } from "@/lib/services/closures";
 import { listFaculties } from "@/lib/services/faculties";
 
@@ -133,10 +133,12 @@ function ManagerContent() {
   const [downloadError,       setDownloadError]       = useState("");
 
   /* Statistics tab */
-  const [statistics,    setStatistics]    = useState([]);
-  const [statsYear,     setStatsYear]     = useState("");
-  const [statsLoading,  setStatsLoading]  = useState(false);
-  const [statsSummary,  setStatsSummary]  = useState(null);
+  const [statistics,         setStatistics]         = useState([]);
+  const [statsYear,          setStatsYear]          = useState("");
+  const [statsLoading,       setStatsLoading]       = useState(false);
+  const [statsSummary,       setStatsSummary]       = useState(null);
+  const [statsSelectedCount, setStatsSelectedCount] = useState(0);
+  const [statsOverdueCount,  setStatsOverdueCount]  = useState(0);
 
   /* Contribution detail */
   const [selectedContrib, setSelectedContrib] = useState(null);
@@ -233,16 +235,60 @@ function ManagerContent() {
 
   const fetchStatistics = async (yearId) => {
     setStatsLoading(true);
+    setStatistics([]);
+    setStatsSummary(null);
+    setStatsSelectedCount(0);
+    setStatsOverdueCount(0);
     try {
-      const res = await getStatistics(yearId || undefined).catch(() => ({ success: false }));
-      if (res.success) {
-        const { faculties, summary: sm } = parseStatistics(res.data);
+      const params = {};
+      if (yearId) params.academicYearId = yearId;
+      const res = await listContributions(params);
+      if (res.success !== false) {
+        const all =
+          Array.isArray(res.data?.contributions) ? res.data.contributions :
+          Array.isArray(res.data?.items)         ? res.data.items         :
+          Array.isArray(res.data)                ? res.data               : [];
+
+        /* Group by faculty */
+        const byFaculty = {};
+        all.forEach((c) => {
+          const fid   = resolveFacultyId(c) || "__unknown";
+          const fname = resolveFacultyName(c) || "Unknown Faculty";
+          if (!byFaculty[fid]) byFaculty[fid] = { facultyId: fid, facultyName: fname, totalContributions: 0, studentIds: new Set() };
+          byFaculty[fid].totalContributions++;
+          const sid = c.student?.studentId || c.student?.id || c.studentId || c.userId;
+          if (sid) byFaculty[fid].studentIds.add(sid);
+        });
+
+        const faculties = Object.values(byFaculty)
+          .map((f) => ({
+            facultyId:         f.facultyId,
+            facultyName:       f.facultyName,
+            totalContributions: f.totalContributions,
+            totalContributors:  f.studentIds.size,
+          }))
+          .sort((a, b) => b.totalContributions - a.totalContributions);
+
+        const total = all.length;
+        const uniqueStudents = new Set(all.map(c => c.student?.studentId || c.student?.id || c.studentId).filter(Boolean));
+        const selectedCount = all.filter((c) =>
+          c.isSelected === true ||
+          (c?.status || c?.contributionStatus || c?.statusName || "").toUpperCase() === "SELECTED"
+        ).length;
+        const now = Date.now();
+        const overdueInYear = all.filter((c) => {
+          const s = (c.status || c.contributionStatus || c.statusName || "").toUpperCase();
+          if (s !== "SUBMITTED" && s !== "PENDING") return false;
+          const d = c.createdAt || c.submittedAt || null;
+          return d ? now - new Date(d).getTime() > 14 * 24 * 60 * 60 * 1000 : false;
+        }).length;
         setStatistics(faculties);
-        if (sm) setStatsSummary(sm);
+        setStatsSummary({ totalContributions: total, totalContributors: uniqueStudents.size });
+        setStatsSelectedCount(selectedCount);
+        setStatsOverdueCount(overdueInYear);
       }
-    } finally {
-      setStatsLoading(false);
-    }
+    } catch {}
+    setStatsLoading(false);
   };
 
   const handleStatsYearChange = (yearId) => {
@@ -380,6 +426,11 @@ function ManagerContent() {
     ? contributions.filter((c) => resolveFacultyId(c) === facultyFilter || resolveFacultyName(c) === facultyFilter)
     : contributions;
 
+  /* final closure date for selected academic year */
+  const selectedAY        = academicYears.find((y) => (y.academicYearId || y.id) === selectedYear);
+  const finalClosureDate  = selectedAY?.closureDate?.finalClosureDate || null;
+  const afterFinalClosure = finalClosureDate ? new Date() >= new Date(finalClosureDate) : false;
+
   /* selected counts derived from contributions state (statistics API doesn't return this) */
   const totalSelectedCount = contributions.length;
   const selectedByFaculty = contributions.reduce((acc, c) => {
@@ -410,266 +461,249 @@ function ManagerContent() {
                 </div>
               </div>
 
-              <div className="alert info" style={{ marginBottom: 16 }}>
-                <span className="alert-icon">🔵</span>
-                {lastLoginAt ? (
-                  <div>Last login: <strong>{new Date(lastLoginAt).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}, {new Date(lastLoginAt).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true })}</strong></div>
-                ) : (
-                  <div>Welcome! 🎉 This is your <strong>first time</strong> logging in.</div>
-                )}
-              </div>
-
-              <div className="download-cta">
-                <div className="dl-text">
-                  <h3>📦 Download All Selected Contributions</h3>
-                  <p>All selected articles and images packaged as a single ZIP file for external transfer. Available after final closure date.</p>
-                </div>
-                <button
-                  className="btn btn-primary btn-lg"
-                  onClick={handleDownload}
-                  disabled={downloadLoading || !selectedYear}
-                >
-                  {downloadLoading ? "Preparing…" : "⬇ Download ZIP"}
-                </button>
-              </div>
-              {downloadError && (
-                <div className="alert dang" style={{ marginBottom: 16 }}>
-                  <span className="alert-icon">⚠️</span>
-                  <div>{downloadError}</div>
+              {!selectedContrib && (
+                <div className="alert info" style={{ marginBottom: 16 }}>
+                  <span className="alert-icon">🔵</span>
+                  {lastLoginAt ? (
+                    <div>Last login: <strong>{new Date(lastLoginAt).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}, {new Date(lastLoginAt).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true })}</strong></div>
+                  ) : (
+                    <div>Welcome! 🎉 This is your <strong>first time</strong> logging in.</div>
+                  )}
                 </div>
               )}
 
-              <div className="stats">
-                <div className="stat green"><div className="stat-n">{contributionsLoading ? "…" : contributions.length}</div><div className="stat-l">Selected Contributions</div></div>
-                <div className="stat"><div className="stat-n">{loading ? "…" : summary?.totalContributions ?? "—"}</div><div className="stat-l">Total Contributions</div></div>
-                <div className="stat"><div className="stat-n">{loading ? "…" : facultyCount ?? "—"}</div><div className="stat-l">Total Faculties</div></div>
-                <div className="stat"><div className="stat-n">{loading ? "…" : totalUsers ?? summary?.totalUsers ?? "—"}</div><div className="stat-l">Total Users</div></div>
-                <div className="stat red"><div className="stat-n">{loading ? "…" : overdueCount ?? "—"}</div><div className="stat-l">Overdue Comments</div></div>
-              </div>
-
-              <div className="two-col">
-
-              {/* LEFT — contributions list */}
-              <div className="card" style={{ marginBottom: 0 }}>
-                <div className="ch" style={{ flexWrap: "wrap", gap: 8 }}>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div className="ch-title">All Selected Contributions</div>
-                    <div className="ch-sub">University-wide · {filteredContributions.length} contribution{filteredContributions.length !== 1 ? "s" : ""}</div>
-                  </div>
-                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                    <select
-                      value={selectedYear}
-                      onChange={(e) => { setSelectedYear(e.target.value); setFacultyFilter(""); }}
-                      style={{ border: "1.5px solid var(--border)", borderRadius: 7, padding: "7px 12px", fontFamily: "inherit", fontSize: 13 }}
+              {!selectedContrib && (
+                <>
+                  <div className="download-cta">
+                    <div className="dl-text">
+                      <h3>📦 Download All Selected Contributions</h3>
+                      <p>All selected articles and images packaged as a single ZIP file for external transfer.{finalClosureDate ? ` Available after final closure date (${fmtDate(finalClosureDate)}).` : ""}</p>
+                    </div>
+                    <button
+                      className="btn btn-primary btn-lg"
+                      onClick={handleDownload}
+                      disabled={downloadLoading || !selectedYear || !afterFinalClosure}
+                      title={!afterFinalClosure ? `Downloads are available after the final closure date${finalClosureDate ? ` (${fmtDate(finalClosureDate)})` : ""}` : ""}
                     >
-                      {academicYears.map((ay, i) => (
-                        <option key={ay.academicYearId || ay.id || i} value={ay.academicYearId || ay.id}>
-                          {ayLabel(ay)}
-                        </option>
-                      ))}
-                    </select>
-                    <select
-                      value={facultyFilter}
-                      onChange={(e) => setFacultyFilter(e.target.value)}
-                      style={{ border: "1.5px solid var(--border)", borderRadius: 7, padding: "7px 12px", fontFamily: "inherit", fontSize: 13 }}
-                    >
-                      <option value="">All Faculties</option>
-                      {faculties.map((f) => (
-                        <option key={f.facultyId} value={f.facultyId}>{f.facultyName}</option>
-                      ))}
-                    </select>
+                      {downloadLoading ? "Preparing…" : "⬇ Download ZIP"}
+                    </button>
                   </div>
+                  {!afterFinalClosure && finalClosureDate && (
+                    <div className="alert warn" style={{ marginBottom: 16 }}>
+                      <span className="alert-icon">🔒</span>
+                      <div>Downloads are locked until after the final closure date: <strong>{fmtDate(finalClosureDate)}</strong></div>
+                    </div>
+                  )}
+                  {downloadError && (
+                    <div className="alert dang" style={{ marginBottom: 16 }}>
+                      <span className="alert-icon">⚠️</span>
+                      <div>{downloadError}</div>
+                    </div>
+                  )}
+                </>
+              )}
+
+
+              {/* ── Contribution detail (full page, no card) ── */}
+              {selectedContrib ? (
+                <div>
+                  <button
+                    onClick={() => { clearBlobs(); setSelectedContrib(null); setDetailData(null); }}
+                    style={{ background: "none", border: "none", cursor: "pointer", color: "var(--navy)", fontFamily: "inherit", fontSize: 14, fontWeight: 700, padding: 0, marginBottom: 20, display: "flex", alignItems: "center", gap: 6 }}
+                  >
+                    ← Back to List
+                  </button>
+
+                  <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, marginBottom: 6, flexWrap: "wrap" }}>
+                    <h2 style={{ fontFamily: "'Libre Baskerville', serif", fontSize: 22, color: "var(--navy)", margin: 0, lineHeight: 1.3 }}>
+                      {(detailData || selectedContrib)?.contributionTitle || (detailData || selectedContrib)?.title || "Untitled"}
+                    </h2>
+                    <span className="badge b-green">✅ Selected</span>
+                  </div>
+                  <div style={{ fontSize: 13, color: "var(--text-muted)", marginBottom: 24 }}>
+                    {resolveStudent(detailData || selectedContrib)
+                      ? <><strong>{resolveStudent(detailData || selectedContrib)}</strong> · Submitted {fmtDate((detailData || selectedContrib)?.submittedAt || (detailData || selectedContrib)?.createdAt)}</>
+                      : fmtDate((detailData || selectedContrib)?.createdAt)
+                    }
+                  </div>
+
+                  {detailLoading ? (
+                    <div style={{ textAlign: "center", color: "var(--text-muted)", fontSize: 13, padding: "24px 0" }}>Loading details…</div>
+                  ) : (
+                    <>
+                      <div className="meta-grid" style={{ marginBottom: 20 }}>
+                        <div className="meta-box">
+                          <div className="meta-key">Author</div>
+                          <div className="meta-val" style={{ fontWeight: 600 }}>{resolveStudent(detailData || selectedContrib) || "—"}</div>
+                        </div>
+                        <div className="meta-box">
+                          <div className="meta-key">Faculty</div>
+                          <div className="meta-val">{resolveFacultyName(detailData || selectedContrib) || "—"}</div>
+                        </div>
+                        <div className="meta-box">
+                          <div className="meta-key">Submitted</div>
+                          <div className="meta-val">{fmtDate((detailData || selectedContrib)?.submittedAt || (detailData || selectedContrib)?.createdAt) || "—"}</div>
+                        </div>
+                        {(detailData || selectedContrib)?.updatedAt && (
+                          <div className="meta-box">
+                            <div className="meta-key">Last Updated</div>
+                            <div className="meta-val">{fmtDate((detailData || selectedContrib).updatedAt)}</div>
+                          </div>
+                        )}
+                      </div>
+
+                      {(detailData || selectedContrib)?.description && (
+                        <div style={{ fontSize: 14, lineHeight: 1.8, color: "var(--text-mid)", marginBottom: 24 }}>
+                          {(detailData || selectedContrib).description}
+                        </div>
+                      )}
+
+                      <div style={{ fontSize: 13, fontWeight: 600, color: "var(--navy)", marginBottom: 12 }}>📎 Attached Files</div>
+                      {filesLoading ? (
+                        <div style={{ fontSize: 13, color: "var(--text-muted)" }}>Loading files…</div>
+                      ) : (
+                        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                          {/* Document row */}
+                          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, padding: "12px 14px", background: "var(--sky)", borderRadius: 8 }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                              <span style={{ fontSize: 20 }}>📄</span>
+                              <div>
+                                <div style={{ fontSize: 13, fontWeight: 600, color: "var(--navy)" }}>
+                                  {(detailData || selectedContrib)?.originalFileName || (detailData || selectedContrib)?.fileName || "Article Document"}
+                                </div>
+                                <div style={{ fontSize: 11, color: "var(--text-muted)" }}>Word Document (.doc / .docx)</div>
+                              </div>
+                            </div>
+                            <div style={{ display: "flex", gap: 6 }}>
+                              {docBlob ? (
+                                <>
+                                  <button className="btn btn-outline btn-sm"
+                                    onClick={() => viewDocument(docBlob.blob, (detailData || selectedContrib)?.originalFileName || (detailData || selectedContrib)?.fileName || "document.docx")}>
+                                    👁 View
+                                  </button>
+                                  <button className="btn btn-navy btn-sm"
+                                    disabled={!afterFinalClosure}
+                                    title={!afterFinalClosure ? `Available after ${fmtDate(finalClosureDate)}` : ""}
+                                    onClick={() => {
+                                      const student  = resolveStudent(detailData || selectedContrib) || "student";
+                                      const origName = (detailData || selectedContrib)?.originalFileName || (detailData || selectedContrib)?.fileName || `contribution-${cid(selectedContrib)}.docx`;
+                                      triggerDownload(docBlob.blobUrl, `${student}_${origName}`);
+                                    }}>
+                                    ⬇ Download
+                                  </button>
+                                </>
+                              ) : (
+                                <span style={{ fontSize: 11, color: "var(--danger, #b52a2a)" }}>{fileErr || "Not available"}</span>
+                              )}
+                            </div>
+                          </div>
+                          {/* Image row */}
+                          <div style={{ padding: "12px 14px", background: "var(--sky)", borderRadius: 8 }}>
+                            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: imgBlob ? 12 : 0 }}>
+                              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                                <span style={{ fontSize: 20 }}>🖼️</span>
+                                <div>
+                                  <div style={{ fontSize: 13, fontWeight: 600, color: "var(--navy)" }}>
+                                    {(detailData || selectedContrib)?.imageName || (detailData || selectedContrib)?.imageFileName || "Supporting Image"}
+                                  </div>
+                                  <div style={{ fontSize: 11, color: "var(--text-muted)" }}>Image</div>
+                                </div>
+                              </div>
+                              {imgBlob ? (
+                                <button className="btn btn-navy btn-sm"
+                                  disabled={!afterFinalClosure}
+                                  title={!afterFinalClosure ? `Available after ${fmtDate(finalClosureDate)}` : ""}
+                                  onClick={() => {
+                                    const student  = resolveStudent(detailData || selectedContrib) || "student";
+                                    const origName = (detailData || selectedContrib)?.imageName || (detailData || selectedContrib)?.imageFileName || `image-${cid(selectedContrib)}`;
+                                    triggerDownload(imgBlob.blobUrl, `${student}_${origName}`);
+                                  }}>
+                                  ⬇ Download
+                                </button>
+                              ) : (
+                                <span style={{ fontSize: 11, color: "var(--danger, #b52a2a)" }}>{imgErr || "Not available"}</span>
+                              )}
+                            </div>
+                            {imgBlob && (
+                              <img src={imgBlob.blobUrl} alt="Supporting image"
+                                style={{ width: "100%", maxHeight: 400, objectFit: "contain", borderRadius: 6, background: "#fff", display: "block" }} />
+                            )}
+                          </div>
+                        </div>
+                      )}
+                    </>
+                  )}
                 </div>
-                {contributionsLoading ? (
-                  <div style={{ padding: "32px", textAlign: "center", color: "var(--text-muted)" }}>Loading…</div>
-                ) : filteredContributions.length === 0 ? (
-                  <div className="cb">
-                    <div className="alert info" style={{ margin: 0 }}>
-                      <span className="alert-icon">📂</span>
-                      <div>{facultyFilter ? `No selected contributions for ${faculties.find(f => f.facultyId === facultyFilter)?.facultyName || facultyFilter}.` : "No selected contributions found for this academic year."}</div>
+              ) : (
+                /* ── Contributions list ── */
+                <div className="card">
+                  <div className="ch" style={{ flexWrap: "wrap", gap: 8 }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div className="ch-title">All Selected Contributions</div>
+                      <div className="ch-sub">University-wide · {filteredContributions.length} contribution{filteredContributions.length !== 1 ? "s" : ""}</div>
+                    </div>
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                      <select
+                        value={selectedYear}
+                        onChange={(e) => { setSelectedYear(e.target.value); setFacultyFilter(""); }}
+                        style={{ border: "1.5px solid var(--border)", borderRadius: 7, padding: "7px 12px", fontFamily: "inherit", fontSize: 13 }}
+                      >
+                        {academicYears.map((ay, i) => (
+                          <option key={ay.academicYearId || ay.id || i} value={ay.academicYearId || ay.id}>
+                            {ayLabel(ay)}
+                          </option>
+                        ))}
+                      </select>
+                      <select
+                        value={facultyFilter}
+                        onChange={(e) => setFacultyFilter(e.target.value)}
+                        style={{ border: "1.5px solid var(--border)", borderRadius: 7, padding: "7px 12px", fontFamily: "inherit", fontSize: 13 }}
+                      >
+                        <option value="">All Faculties</option>
+                        {faculties.map((f) => (
+                          <option key={f.facultyId} value={f.facultyId}>{f.facultyName}</option>
+                        ))}
+                      </select>
                     </div>
                   </div>
-                ) : (
-                  <div style={{ maxHeight: 520, overflowY: "auto" }}>
-                    {filteredContributions.map((c, i) => {
-                      const isActive = cid(c) === cid(selectedContrib);
-                      return (
+                  {contributionsLoading ? (
+                    <div style={{ padding: "32px", textAlign: "center", color: "var(--text-muted)" }}>Loading…</div>
+                  ) : filteredContributions.length === 0 ? (
+                    <div className="cb">
+                      <div className="alert info" style={{ margin: 0 }}>
+                        <span className="alert-icon">📂</span>
+                        <div>{facultyFilter ? `No selected contributions for ${faculties.find(f => f.facultyId === facultyFilter)?.facultyName || facultyFilter}.` : "No selected contributions found for this academic year."}</div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div>
+                      {filteredContributions.map((c, i) => (
                         <div
                           key={cid(c) || i}
                           onClick={() => openDetail(c)}
                           style={{
-                            padding: "12px 16px", cursor: "pointer",
+                            padding: "14px 16px", cursor: "pointer",
                             borderBottom: "1px solid var(--border)",
-                            borderLeft: `3px solid var(--success)`,
-                            background: isActive ? "var(--sky)" : "#fff",
-                            transition: "background .1s",
+                            borderLeft: "3px solid var(--success)",
+                            background: "#fff", transition: "background .1s",
                           }}
+                          onMouseEnter={(e) => e.currentTarget.style.background = "var(--sky)"}
+                          onMouseLeave={(e) => e.currentTarget.style.background = "#fff"}
                         >
-                          <div style={{ fontSize: 13.5, fontWeight: 600, color: "var(--navy)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                          <div style={{ fontSize: 13.5, fontWeight: 600, color: "var(--navy)", marginBottom: 4 }}>
                             {c.contributionTitle || c.title || "Untitled"}
                           </div>
-                          <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 3, display: "flex", flexWrap: "wrap", gap: "0 8px" }}>
+                          <div style={{ fontSize: 12, color: "var(--text-muted)", display: "flex", flexWrap: "wrap", gap: "0 12px" }}>
                             <span>👤 {resolveStudent(c) || "—"}</span>
                             <span>🏫 {resolveFacultyName(c) || "—"}</span>
                             <span>📅 {fmtDate(c.submittedAt || c.createdAt)}</span>
                           </div>
                         </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-
-              {/* RIGHT — detail panel */}
-              <div>
-                {!selectedContrib ? (
-                  <div className="card" style={{ padding: "48px 24px", textAlign: "center" }}>
-                    <div style={{ fontSize: 36, marginBottom: 12 }}>📋</div>
-                    <div style={{ fontWeight: 700, color: "var(--navy)", fontSize: 14, marginBottom: 5 }}>No contribution selected</div>
-                    <div style={{ color: "var(--text-muted)", fontSize: 13 }}>Click a row on the left to view its details.</div>
-                  </div>
-                ) : (
-                  <div className="card">
-                    <div className="ch">
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div className="ch-title" style={{ fontSize: 15, display: "flex", alignItems: "center", gap: 8 }}>
-                          <button
-                            onClick={() => { clearBlobs(); setSelectedContrib(null); setDetailData(null); }}
-                            style={{ background: "none", border: "none", cursor: "pointer", fontSize: 18, color: "var(--blue)", padding: 0, lineHeight: 1 }}
-                            title="Back to list"
-                          >←</button>
-                          {(detailData || selectedContrib)?.contributionTitle || (detailData || selectedContrib)?.title || "Untitled"}
-                        </div>
-                        <div className="ch-sub">
-                          {resolveStudent(detailData || selectedContrib)
-                            ? <><strong>{resolveStudent(detailData || selectedContrib)}</strong> · Submitted {fmtDate((detailData || selectedContrib)?.submittedAt || (detailData || selectedContrib)?.createdAt)}</>
-                            : fmtDate((detailData || selectedContrib)?.createdAt)
-                          }
-                        </div>
-                      </div>
-                      <span className="badge b-green">✅ Selected</span>
+                      ))}
                     </div>
-
-                    <div className="cb">
-                      {detailLoading ? (
-                        <div style={{ padding: "24px 0", textAlign: "center", color: "var(--text-muted)", fontSize: 13 }}>Loading details…</div>
-                      ) : (
-                        <>
-                          <div className="meta-grid" style={{ marginBottom: 16 }}>
-                            <div className="meta-box">
-                              <div className="meta-key">Author</div>
-                              <div className="meta-val" style={{ fontWeight: 600 }}>
-                                {resolveStudent(detailData || selectedContrib) || "—"}
-                              </div>
-                            </div>
-                            <div className="meta-box">
-                              <div className="meta-key">Faculty</div>
-                              <div className="meta-val">
-                                {resolveFacultyName(detailData || selectedContrib) || "—"}
-                              </div>
-                            </div>
-                            <div className="meta-box">
-                              <div className="meta-key">Submitted</div>
-                              <div className="meta-val">
-                                {fmtDate((detailData || selectedContrib)?.submittedAt || (detailData || selectedContrib)?.createdAt) || "—"}
-                              </div>
-                            </div>
-                            {(detailData || selectedContrib)?.updatedAt && (
-                              <div className="meta-box">
-                                <div className="meta-key">Last Updated</div>
-                                <div className="meta-val">{fmtDate((detailData || selectedContrib).updatedAt)}</div>
-                              </div>
-                            )}
-                          </div>
-
-                          {(detailData || selectedContrib)?.description ? (
-                            <div style={{ fontSize: 14, lineHeight: 1.7, color: "var(--text-mid)", marginBottom: 16, padding: "12px 14px", background: "var(--sky)", borderRadius: 8 }}>
-                              {(detailData || selectedContrib).description}
-                            </div>
-                          ) : null}
-
-                          {/* Attached files */}
-                          <div>
-                            <div style={{ fontSize: 13, fontWeight: 600, color: "var(--navy)", marginBottom: 10 }}>📎 Attached Files</div>
-                            {filesLoading ? (
-                              <div style={{ fontSize: 13, color: "var(--text-muted)" }}>Loading files…</div>
-                            ) : (
-                              <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-                                {/* Document */}
-                                <div style={{ background: "var(--sky)", borderRadius: 8, padding: "12px 14px" }}>
-                                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
-                                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                                      <span style={{ fontSize: 20 }}>📄</span>
-                                      <div>
-                                        <div style={{ fontSize: 13, fontWeight: 600, color: "var(--navy)" }}>
-                                          {(detailData || selectedContrib)?.originalFileName || (detailData || selectedContrib)?.fileName || "Article Document"}
-                                        </div>
-                                        <div style={{ fontSize: 11, color: "var(--text-muted)" }}>Word Document (.doc / .docx)</div>
-                                      </div>
-                                    </div>
-                                    <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                                      {docBlob ? (
-                                        <>
-                                          <button className="btn btn-outline btn-sm"
-                                            onClick={() => viewDocument(docBlob.blob, (detailData || selectedContrib)?.originalFileName || (detailData || selectedContrib)?.fileName || "document.docx")}>
-                                            👁 View
-                                          </button>
-                                          <button className="btn btn-navy btn-sm"
-                                            onClick={() => {
-                                              const student  = resolveStudent(detailData || selectedContrib) || "student";
-                                              const origName = (detailData || selectedContrib)?.originalFileName || (detailData || selectedContrib)?.fileName || `contribution-${cid(selectedContrib)}.docx`;
-                                              triggerDownload(docBlob.blobUrl, `${student}_${origName}`);
-                                            }}>
-                                            ⬇ Download
-                                          </button>
-                                        </>
-                                      ) : (
-                                        <span style={{ fontSize: 11, color: "var(--danger, #b52a2a)" }}>{fileErr || "Not available"}</span>
-                                      )}
-                                    </div>
-                                  </div>
-                                </div>
-                                {/* Image */}
-                                <div style={{ background: "var(--sky)", borderRadius: 8, padding: "12px 14px" }}>
-                                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: imgBlob ? 10 : 0 }}>
-                                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                                      <span style={{ fontSize: 20 }}>🖼️</span>
-                                      <div>
-                                        <div style={{ fontSize: 13, fontWeight: 600, color: "var(--navy)" }}>
-                                          {(detailData || selectedContrib)?.imageName || (detailData || selectedContrib)?.imageFileName || "Supporting Image"}
-                                        </div>
-                                        <div style={{ fontSize: 11, color: "var(--text-muted)" }}>Image</div>
-                                      </div>
-                                    </div>
-                                    {imgBlob ? (
-                                      <button className="btn btn-navy btn-sm"
-                                        onClick={() => {
-                                          const student  = resolveStudent(detailData || selectedContrib) || "student";
-                                          const origName = (detailData || selectedContrib)?.imageName || (detailData || selectedContrib)?.imageFileName || `image-${cid(selectedContrib)}`;
-                                          triggerDownload(imgBlob.blobUrl, `${student}_${origName}`);
-                                        }}>
-                                        ⬇ Download
-                                      </button>
-                                    ) : (
-                                      <span style={{ fontSize: 11, color: "var(--danger, #b52a2a)" }}>{imgErr || "Not available"}</span>
-                                    )}
-                                  </div>
-                                  {imgBlob && (
-                                    <img src={imgBlob.blobUrl} alt="Supporting image"
-                                      style={{ width: "100%", maxHeight: 300, objectFit: "contain", borderRadius: 6, background: "#fff", display: "block" }} />
-                                  )}
-                                </div>
-                              </div>
-                            )}
-                          </div>
-                        </>
-                      )}
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              </div>{/* end two-col */}
+                  )}
+                </div>
+              )}
             </>
           )}
 
@@ -680,7 +714,7 @@ function ManagerContent() {
                 <div>
                   <div className="pg-title">Statistics</div>
                   <div className="pg-sub">
-                    {statsYearLabel ? ayLabel(statsYearLabel) : "All Academic Years"} · Contributions by Faculty
+                    {statsYearLabel ? ayLabel(statsYearLabel) : ""} · Contributions by Faculty
                   </div>
                 </div>
                 <button className="btn btn-outline btn-sm" onClick={() => fetchStatistics(statsYear)}>↺ Refresh</button>
@@ -689,20 +723,24 @@ function ManagerContent() {
               {/* Summary stat cards */}
               <div className="stats" style={{ marginBottom: 20 }}>
                 <div className="stat">
-                  <div className="stat-n">{statsLoading ? "…" : (statsSummary?.totalContributions ?? (statistics.reduce((s, f) => s + (f.totalContributions || 0), 0) || "—"))}</div>
+                  <div className="stat-n">{statsLoading ? "…" : (statsSummary?.totalContributions ?? statistics.reduce((s, f) => s + (f.totalContributions || 0), 0))}</div>
                   <div className="stat-l">Total Contributions</div>
                 </div>
                 <div className="stat">
-                  <div className="stat-n">{statsLoading ? "…" : ((statsSummary?.totalContributors ?? statistics.reduce((s, f) => s + (f.totalContributors || 0), 0)) || "—")}</div>
+                  <div className="stat-n">{statsLoading ? "…" : (statsSummary?.totalContributors ?? statistics.reduce((s, f) => s + (f.totalContributors || 0), 0))}</div>
                   <div className="stat-l">Total Contributors</div>
                 </div>
                 <div className="stat green">
-                  <div className="stat-n">{contributionsLoading ? "…" : totalSelectedCount}</div>
+                  <div className="stat-n">{statsLoading ? "…" : statsSelectedCount}</div>
                   <div className="stat-l">Selected</div>
                 </div>
                 <div className="stat">
-                  <div className="stat-n">{statsLoading ? "…" : statistics.length || "—"}</div>
+                  <div className="stat-n">{statsLoading ? "…" : statistics.length}</div>
                   <div className="stat-l">Faculties</div>
+                </div>
+                <div className="stat red">
+                  <div className="stat-n">{statsLoading ? "…" : statsOverdueCount}</div>
+                  <div className="stat-l">Overdue Comments</div>
                 </div>
               </div>
 
@@ -712,7 +750,7 @@ function ManagerContent() {
                   <div>
                     <div className="ch-title">Contributions by Faculty</div>
                     <div className="ch-sub">
-                      {statsYearLabel ? ayLabel(statsYearLabel) : "All Academic Years"} · {statistics.reduce((s, f) => s + (f.totalContributions || 0), 0)} contributions
+                      {statsYearLabel ? ayLabel(statsYearLabel) : ""} · {statistics.reduce((s, f) => s + (f.totalContributions || 0), 0)} contributions
                     </div>
                   </div>
                   <select
@@ -720,7 +758,6 @@ function ManagerContent() {
                     onChange={(e) => handleStatsYearChange(e.target.value)}
                     style={{ fontSize: 13, padding: "5px 10px", border: "1.5px solid var(--border)", borderRadius: 6, color: "var(--text)", background: "#fff", fontFamily: "inherit" }}
                   >
-                    <option value="">All Academic Years</option>
                     {academicYears.map((y) => (
                       <option key={y.academicYearId || y.id} value={y.academicYearId || y.id}>{ayLabel(y)}</option>
                     ))}
