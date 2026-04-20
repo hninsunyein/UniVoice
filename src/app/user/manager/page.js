@@ -114,7 +114,7 @@ async function fetchBlobUrl(endpoint) {
 
 function ManagerContent() {
   const router      = useRouter();
-  useSessionGuard();
+  useSessionGuard("/login", ["MARKETING_MANAGER"]);
   const searchParams = useSearchParams();
   const activeTab   = searchParams.get("tab") || "selected";
 

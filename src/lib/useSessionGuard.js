@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { getAccessToken, clearTokens } from "@/lib/api";
+import { getAccessToken, clearTokens, getUser } from "@/lib/api";
 
 const INACTIVITY_MS = 30 * 60 * 1000; // 30 minutes
 
@@ -17,10 +17,14 @@ function isJwtExpired(token) {
 /**
  * Protects a dashboard page.
  * - Redirects to loginPath if no token or JWT is expired.
+ * - If allowedRoles is provided, redirects to /403 if the user's role is not allowed.
  * - Auto-logs out after INACTIVITY_MS of no user activity.
  * - Re-checks on tab focus (catches sessions expired on other devices).
+ *
+ * @param {string} loginPath  - where to redirect unauthenticated users (default: "/login")
+ * @param {string[]|null} allowedRoles - roles permitted to access this page (null = any authenticated user)
  */
-export function useSessionGuard(loginPath = "/login") {
+export function useSessionGuard(loginPath = "/login", allowedRoles = null) {
   const router = useRouter();
   const timerRef = useRef(null);
 
@@ -29,6 +33,13 @@ export function useSessionGuard(loginPath = "/login") {
     localStorage.setItem("sessionExpired", "true");
     router.push(loginPath);
   }, [loginPath, router]);
+
+  const checkRole = useCallback(() => {
+    if (!allowedRoles) return true;
+    const user = getUser();
+    const role = (user?.roleName || user?.role || "").toUpperCase();
+    return !!role && allowedRoles.includes(role);
+  }, [allowedRoles]);
 
   const resetTimer = useCallback(() => {
     if (timerRef.current) clearTimeout(timerRef.current);
@@ -42,6 +53,12 @@ export function useSessionGuard(loginPath = "/login") {
       return;
     }
 
+    // Role check — redirect to /403 if the user lacks the required role
+    if (!checkRole()) {
+      router.replace("/403");
+      return;
+    }
+
     resetTimer();
 
     const events = ["mousemove", "keydown", "touchstart", "scroll", "click"];
@@ -51,6 +68,7 @@ export function useSessionGuard(loginPath = "/login") {
       if (document.visibilityState === "visible") {
         const t = getAccessToken();
         if (!t || isJwtExpired(t)) signOut();
+        else if (!checkRole()) router.replace("/403");
         else resetTimer();
       }
     };
@@ -61,5 +79,5 @@ export function useSessionGuard(loginPath = "/login") {
       events.forEach((e) => window.removeEventListener(e, resetTimer));
       document.removeEventListener("visibilitychange", handleVisibility);
     };
-  }, [signOut, resetTimer]);
+  }, [signOut, resetTimer, checkRole, router]);
 }

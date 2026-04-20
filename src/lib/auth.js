@@ -74,6 +74,9 @@ export const login = async (email, password, facultyId) => {
     else localStorage.removeItem(`lastLoginAt_${key}`);
     localStorage.setItem(`loginAt_${key}`, new Date().toISOString());
     localStorage.setItem("activeUserEmail", key);
+    // Set role cookie so middleware can enforce RBAC on every request
+    const role = (user?.roleName || user?.role || "").toUpperCase();
+    document.cookie = `univoice_role=${role}; path=/; SameSite=Strict`;
   }
 
   const path = resolveRole(user?.roleName) || resolveRole(user?.role) || "/admin";
@@ -110,6 +113,8 @@ export const firstLoginChangePassword = async (email, currentPassword, newPasswo
     else localStorage.removeItem(`lastLoginAt_${key}`);
     localStorage.setItem(`loginAt_${key}`, new Date().toISOString());
     localStorage.setItem("activeUserEmail", key);
+    const role = (user?.roleName || user?.role || "").toUpperCase();
+    document.cookie = `univoice_role=${role}; path=/; SameSite=Strict`;
   }
 
   const path = resolveRole(user?.roleName) || resolveRole(user?.role) || "/user/student";

@@ -32,7 +32,7 @@ const bgPool = [
 
 export default function GuestPage() {
   const router = useRouter();
-  useSessionGuard();
+  useSessionGuard("/login", ["GUEST"]);
   const [user, setUser] = useState(null);
 
   const [contributions,     setContributions]     = useState([]);

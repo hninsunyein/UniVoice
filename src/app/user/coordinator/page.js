@@ -169,7 +169,7 @@ async function viewDocument(blob, fileName) {
 
 export default function CoordinatorPage() {
   const router = useRouter();
-  useSessionGuard();
+  useSessionGuard("/login", ["MARKETING_COORDINATOR"]);
   const [user, setUser] = useState(null);
 
   const [activePage,       setActivePage]       = useState("contributions"); // "contributions" | "guests"

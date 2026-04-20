@@ -200,7 +200,7 @@ function ExceptionTable({ items, showDays, emptyMessage }) {
 
 export default function AdminPage() {
   const router = useRouter();
-  useSessionGuard("/admin/login");
+  useSessionGuard("/admin/login", ["SUPER_ADMIN", "ADMIN"]);
   const [user,            setUser]           = useState(null);
   const [lastLoginAt,     setLastLoginAt]    = useState(null);
   const [activeTab,       setActiveTab]      = useState("statistics");

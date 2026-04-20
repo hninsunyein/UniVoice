@@ -53,7 +53,7 @@ const cid = (c) => c?.contributionId || c?.id || c?._id;
 
 function StudentDashboard() {
   const router      = useRouter();
-  useSessionGuard();
+  useSessionGuard("/login", ["STUDENT"]);
   const searchParams = useSearchParams();
   const activeTab   = searchParams.get("tab") || "dashboard";
   const [user, setUser]                             = useState(null);

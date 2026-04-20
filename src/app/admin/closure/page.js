@@ -9,6 +9,7 @@ import {
 } from "@/lib/services/closures";
 import { listTerms } from "@/lib/services/terms";
 import { getAccessToken, getUser } from "@/lib/api";
+import { useSessionGuard } from "@/lib/useSessionGuard";
 
 const sidebarConfig = {
   profile: {
@@ -94,6 +95,7 @@ const EMPTY_YEAR    = { startDate: "", endDate: "", termsConditionsVerId: "" };
 
 export default function ClosureDatesPage() {
   const router = useRouter();
+  useSessionGuard("/admin/login", ["SUPER_ADMIN", "ADMIN"]);
   const [currentUser, setCurrentUser] = useState(null);
 
   const [academicYears, setAcademicYears] = useState([]);

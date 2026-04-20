@@ -5,6 +5,7 @@ import Topbar from "@/components/Topbar";
 import Sidebar from "@/components/Sidebar";
 import { listFaculties, createFaculty, updateFaculty } from "@/lib/services/faculties";
 import { getAccessToken, getUser } from "@/lib/api";
+import { useSessionGuard } from "@/lib/useSessionGuard";
 
 const sidebarConfig = {
   profile: {
@@ -29,6 +30,7 @@ const sidebarConfig = {
 
 export default function FacultiesPage() {
   const router = useRouter();
+  useSessionGuard("/admin/login", ["SUPER_ADMIN", "ADMIN"]);
   const [currentUser, setCurrentUser] = useState(null);
 
   const [faculties,      setFaculties]      = useState([]);

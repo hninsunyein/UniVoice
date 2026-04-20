@@ -29,6 +29,7 @@ export const clearTokens = () => {
   localStorage.removeItem("user");
   // loginAt is intentionally kept — on next login it gets promoted to lastLoginAt
   // lastLoginAt is intentionally kept — used on login page (session expired) and dashboards
+  document.cookie = "univoice_role=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=Strict";
 };
 
 export const setUser = (user) =>

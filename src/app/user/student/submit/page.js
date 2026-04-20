@@ -4,6 +4,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import Topbar from "@/components/Topbar";
 import Sidebar from "@/components/Sidebar";
 import { getUser, getAccessToken } from "@/lib/api";
+import { useSessionGuard } from "@/lib/useSessionGuard";
 import { submitContribution, updateContribution, getContribution, selectContribution } from "@/lib/services/contributions";
 import { listAcademicYears } from "@/lib/services/closures";
 
@@ -19,6 +20,7 @@ const MAX_IMAGES = 1;
 
 function SubmitContributionInner() {
   const router       = useRouter();
+  useSessionGuard("/login", ["STUDENT"]);
   const searchParams = useSearchParams();
   const editId       = searchParams.get("edit");
   const isEdit       = Boolean(editId);

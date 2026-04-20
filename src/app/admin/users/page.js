@@ -12,6 +12,7 @@ import {
 import { listFaculties } from "@/lib/services/faculties";
 import { listTerms } from "@/lib/services/terms";
 import { getUser as getLocalUser, getAccessToken } from "@/lib/api";
+import { useSessionGuard } from "@/lib/useSessionGuard";
 import { useRouter } from "next/navigation";
 
 const ROLES = [
@@ -46,6 +47,7 @@ const PAGE_SIZE = 20;
 
 export default function UsersPage() {
   const router = useRouter();
+  useSessionGuard("/admin/login", ["SUPER_ADMIN", "ADMIN"]);
   const [currentUser, setCurrentUser] = useState(null);
 
   /* ── data ── */
